@@ -100,76 +100,87 @@ const estimateCalories = (session, bodyweightKg=80) => {
 
 /* ═══════════════════════════════════════════════════════════  EXERCISES  */
 const EX = {
+  // Alle Werte: strengthlevel.de, 1RM bei 80 kg Körpergewicht (Männer)
+  // beg=Anfänger(5%) nov=Geübt(20%) int=Fortgeschritten(50%) adv=Profi(80%) eli=Elite(95%+)
   Chest: [
-    { id:"bench",        name:"Bench Press",             s:{beg:47,nov:70,int:98, adv:132,pro:169,eli:210}, note:"Gesamtgewicht inkl. 20 kg Stange. Klassisches flaches Bankdrücken." },
-    { id:"incline_bench",name:"Schrägbankdrücken",       s:{beg:44,nov:64,int:89, adv:118,pro:149,eli:185}, note:"Gesamtgewicht inkl. 20 kg Stange. Bank auf ca. 30–45° eingestellt." },
-    { id:"close_bench",  name:"Enges Bankdrücken",       s:{beg:47,nov:68,int:93, adv:123,pro:155,eli:190}, note:"Gesamtgewicht. Hände schulterbreit – Trizeps-Fokus." },
-    { id:"db_bench",     name:"Kurzhantel Bankdrücken",  s:{beg:16,nov:27,int:41, adv:57, pro:75, eli:95 }, note:"Gewicht pro Kurzhantel. Z.B. 30 eingeben wenn du 2×30 kg verwendest." },
-    { id:"db_incline",   name:"KH Schrägbank Drücken",   s:{beg:13,nov:22,int:34, adv:48, pro:63, eli:80 }, note:"Gewicht pro Kurzhantel. Bank bei 30–45°." },
-    { id:"db_fly",       name:"Kurzhantel Flyes",        s:{beg:6, nov:13,int:24, adv:37, pro:52, eli:68 }, note:"Gewicht pro Kurzhantel. Leichte Ellenbogenbeugung, weiter Bogen." },
-    { id:"cable_fly",    name:"Kabelzug Flyes",          s:{beg:10,nov:18,int:28, adv:40, pro:54, eli:70 }, note:"Gewicht pro Seite. Kabel auf Brusthöhe, Arme zusammenführen." },
-    { id:"chest_dip",    name:"Dips (Brust-Fokus)",      s:{beg:0, nov:8, int:20, adv:34, pro:49, eli:65 }, note:"Anzahl WDHS Körpergewicht. Oberkörper leicht vorgebeugt für Brust-Fokus.", isReps:true },
-    { id:"pushups",      name:"Liegestütze",             s:{beg:1, nov:18,int:41, adv:68, pro:99, eli:130}, note:"Anzahl WDHS Körpergewicht, volles Bewegungsausmaß.", isReps:true },
-    { id:"dips",         name:"Dips",                    s:{beg:0, nov:8, int:20, adv:34, pro:49, eli:65 }, note:"Anzahl WDHS Körpergewicht. Volles Strecken oben.", isReps:true },
+    { id:"bench",         name:"Bankdrücken",               s:{beg:53,nov:74, int:98, adv:127,pro:157,eli:195}, note:"Gesamtgewicht inkl. 20 kg Stange. Klassisches flaches Bankdrücken." },
+    { id:"incline_bench", name:"Schrägbankdrücken",         s:{beg:40,nov:59, int:82, adv:109,pro:139,eli:175}, note:"Gesamtgewicht inkl. 20 kg Stange. Bank auf ca. 30–45° eingestellt." },
+    { id:"close_bench",   name:"Enges Bankdrücken",         s:{beg:47,nov:68, int:93, adv:123,pro:155,eli:190}, note:"Gesamtgewicht inkl. 20 kg Stange. Hände schulterbreit – Trizeps-Fokus." },
+    { id:"db_bench",      name:"KH Bankdrücken",            s:{beg:17,nov:27, int:41, adv:57, pro:75, eli:95 }, note:"Gewicht pro Kurzhantel. Z.B. 30 eingeben wenn du 2×30 kg verwendest." },
+    { id:"db_incline",    name:"KH Schrägbankdrücken",      s:{beg:13,nov:22, int:34, adv:48, pro:63, eli:80 }, note:"Gewicht pro Kurzhantel. Bank bei 30–45°." },
+    { id:"db_fly",        name:"KH Flyes",                  s:{beg:6, nov:11, int:18, adv:27, pro:37, eli:49 }, note:"Gewicht pro Kurzhantel. Leichte Ellenbogenbeugung, weiter Bogen." },
+    { id:"cable_fly",     name:"Kabelzug Flyes",            s:{beg:10,nov:18, int:28, adv:40, pro:54, eli:70 }, note:"Gewicht pro Seite. Kabel auf Brusthöhe, Arme zusammenführen." },
+    { id:"chest_dip",     name:"Dips (Brust-Fokus)",        s:{beg:0, nov:8,  int:20, adv:34, pro:49, eli:65 }, note:"Anzahl WDHS Körpergewicht. Oberkörper leicht vorgebeugt für Brust-Fokus.", isReps:true },
+    { id:"pushups",       name:"Liegestütze",               s:{beg:4, nov:14, int:28, adv:45, pro:64, eli:85 }, note:"Anzahl WDHS Körpergewicht, volles Bewegungsausmaß.", isReps:true },
+    { id:"machine_chest", name:"Brustpresse (Maschine)",    s:{beg:27,nov:49, int:76, adv:108,pro:143,eli:180}, note:"Maschinengewicht. Arme gleichmäßig vorwärts drücken – Brust zusammendrücken." },
+    { id:"pec_deck",      name:"Pec Deck",                  s:{beg:20,nov:36, int:57, adv:82, pro:109,eli:140}, note:"Maschinengewicht. Arme auf Brusthöhe zusammenführen, kontrolliert zurück." },
   ],
   Back: [
-    { id:"deadlift",     name:"Kreuzheben",              s:{beg:78,nov:112,int:152,adv:200,pro:250,eli:305}, note:"Gesamtgewicht inkl. 20 kg Stange. Vom Boden ziehen, volles Strecken oben." },
-    { id:"bent_row",     name:"Vorgebeugtes Rudern",     s:{beg:41,nov:60,int:85, adv:115,pro:147,eli:183}, note:"Gesamtgewicht inkl. 20 kg Stange. Oberkörper ca. parallel zum Boden." },
-    { id:"lat_pulldown", name:"Latzug",                  s:{beg:38,nov:58,int:82, adv:110,pro:141,eli:175}, note:"Maschinengewicht. Stange zur Oberbrust ziehen, Lats zusammendrücken." },
-    { id:"seated_row",   name:"Kabelzug sitzend",        s:{beg:41,nov:61,int:86, adv:115,pro:147,eli:183}, note:"Maschinengewicht. Griff zum Unterbauch ziehen, Rücken gerade." },
-    { id:"pullup",       name:"Klimmzüge",               s:{beg:0, nov:5, int:14, adv:25, pro:37, eli:50 }, note:"Anzahl WDHS Körpergewicht (Obergriff). 0 eingeben wenn noch nicht möglich.", isReps:true },
-    { id:"chinup",       name:"Chin-Ups",                s:{beg:0, nov:6, int:14, adv:24, pro:35, eli:48 }, note:"Anzahl WDHS Körpergewicht (Untergriff).", isReps:true },
-    { id:"db_row",       name:"Kurzhantel Rudern",       s:{beg:16,nov:27,int:43, adv:62, pro:83, eli:105}, note:"Gewicht pro Kurzhantel (ein Arm). Andere Hand auf Bank abstützen." },
-    { id:"rdl",          name:"Rumänisches Kreuzheben",  s:{beg:55,nov:84,int:120,adv:164,pro:211,eli:260}, note:"Gesamtgewicht. Leichte Kniebeugung, Hüfte zurückschieben." },
-    { id:"tbar_row",     name:"T-Bar Rudern",            s:{beg:38,nov:60,int:88, adv:120,pro:155,eli:193}, note:"Gewicht auf der Stange (ohne Stange). Brustpad für geführte Version." },
-    { id:"facepull",     name:"Face Pull",               s:{beg:15,nov:28,int:45, adv:65, pro:88, eli:113}, note:"Kabelgewicht. Seil zur Stirn ziehen, Ellenbogen hoch." },
+    { id:"deadlift",      name:"Kreuzheben",                s:{beg:86,nov:116,int:151,adv:192,pro:235,eli:285}, note:"Gesamtgewicht inkl. 20 kg Stange. Vom Boden ziehen, volles Strecken oben." },
+    { id:"sumo_dl",       name:"Sumo Kreuzheben",           s:{beg:99,nov:131,int:170,adv:213,pro:259,eli:310}, note:"Gesamtgewicht inkl. 20 kg Stange. Weite Fußstellung, Griff zwischen den Beinen." },
+    { id:"rdl",           name:"Rumänisches Kreuzheben",    s:{beg:55,nov:84, int:120,adv:164,pro:211,eli:260}, note:"Gesamtgewicht. Leichte Kniebeugung, Hüfte zurückschieben, Rücken gerade." },
+    { id:"bent_row",      name:"Vorgebeugtes Rudern",       s:{beg:45,nov:63, int:86, adv:112,pro:140,eli:175}, note:"Gesamtgewicht inkl. 20 kg Stange. Oberkörper ca. parallel zum Boden." },
+    { id:"lat_pulldown",  name:"Latzug",                    s:{beg:38,nov:58, int:82, adv:110,pro:141,eli:175}, note:"Maschinengewicht. Stange zur Oberbrust ziehen, Lats zusammendrücken." },
+    { id:"seated_row",    name:"Kabelrudern sitzend",       s:{beg:41,nov:61, int:86, adv:115,pro:147,eli:183}, note:"Maschinengewicht. Griff zum Unterbauch ziehen, Rücken gerade." },
+    { id:"pullup",        name:"Klimmzüge",                 s:{beg:1, nov:5,  int:13, adv:23, pro:35, eli:49 }, note:"Anzahl WDHS Körpergewicht (Obergriff). 0 eingeben wenn noch nicht möglich.", isReps:true },
+    { id:"chinup",        name:"Chin-Ups",                  s:{beg:1, nov:6,  int:14, adv:24, pro:35, eli:48 }, note:"Anzahl WDHS Körpergewicht (Untergriff, Bizeps-Fokus).", isReps:true },
+    { id:"db_row",        name:"KH Rudern",                 s:{beg:19,nov:31, int:47, adv:66, pro:87, eli:110}, note:"Gewicht pro Kurzhantel (ein Arm). Andere Hand auf Bank abstützen." },
+    { id:"tbar_row",      name:"T-Bar Rudern",              s:{beg:38,nov:60, int:88, adv:120,pro:155,eli:193}, note:"Gewicht auf der Stange (ohne Stange). Brustpad für geführte Version." },
+    { id:"facepull",      name:"Face Pull",                 s:{beg:15,nov:28, int:45, adv:65, pro:88, eli:113}, note:"Kabelgewicht. Seil zur Stirn ziehen, Ellenbogen hoch halten." },
+    { id:"rack_pull",     name:"Rack Pull",                 s:{beg:99,nov:140,int:190,adv:248,pro:310,eli:375}, note:"Gesamtgewicht. Kreuzheben aus dem Rack – Stange auf Kniehöhe." },
   ],
   Legs: [
-    { id:"squat",        name:"Kniebeuge",               s:{beg:64,nov:93,int:130,adv:173,pro:219,eli:270}, note:"Gesamtgewicht inkl. 20 kg Stange. Stange auf Schultern, parallel oder tiefer." },
-    { id:"leg_press",    name:"Beinpresse",              s:{beg:86,nov:147,int:226,adv:324,pro:432,eli:550}, note:"Gesamtgewicht auf dem Schlitten – ohne Schlitten selbst." },
-    { id:"hip_thrust",   name:"Hip Thrust",              s:{beg:38,nov:76,int:129,adv:196,pro:273,eli:350}, note:"Gesamtgewicht. Schultern auf Bank, Hüfte voll strecken." },
-    { id:"front_squat",  name:"Front Squat",             s:{beg:47,nov:70,int:99, adv:134,pro:172,eli:215}, note:"Gesamtgewicht inkl. 20 kg Stange. Stange auf Vorderdelt, Ellenbogen hoch." },
-    { id:"leg_ext",      name:"Beinstrecker",            s:{beg:35,nov:61,int:96, adv:139,pro:186,eli:235}, note:"Maschinengewicht. Beide Beine voll strecken – Quadrizeps oben zusammendrücken." },
-    { id:"leg_curl",     name:"Beinbeuger liegend",      s:{beg:23,nov:40,int:64, adv:93, pro:126,eli:160}, note:"Maschinengewicht. Bauchlage, Beine zu Gesäß ziehen." },
-    { id:"calf_raise",   name:"Wadenmaschine",           s:{beg:31,nov:72,int:134,adv:214,pro:307,eli:400}, note:"Maschinengewicht. Volles Strecken und Absenken." },
-    { id:"bss",          name:"Bulgarische Ausfallschritte",s:{beg:8,nov:17,int:30,adv:46,pro:63,eli:82}, note:"Gewicht pro Kurzhantel. Hinterer Fuß auf Bank, vorderer weit vorne.", isBilateral:false },
-    { id:"lunge",        name:"Ausfallschritte",         s:{beg:20,nov:40,int:65, adv:95, pro:130,eli:168}, note:"Gesamtgewicht (Hantelstange oder Kurzhanteln gesamt). Abwechselnd vortreten." },
-    { id:"hack_squat",   name:"Hackenschmidt Squat",     s:{beg:60,nov:100,int:150,adv:210,pro:275,eli:350}, note:"Maschinengewicht auf dem Schlitten. Fußposition tief, tief in die Kniebeuge." },
+    { id:"squat",         name:"Kniebeuge",                 s:{beg:72,nov:98, int:130,adv:166,pro:205,eli:250}, note:"Gesamtgewicht inkl. 20 kg Stange. Stange auf Schultern, parallel oder tiefer." },
+    { id:"front_squat",   name:"Frontkniebeuge",            s:{beg:59,nov:79, int:104,adv:133,pro:163,eli:200}, note:"Gesamtgewicht inkl. 20 kg Stange. Stange auf Vorderdelt, Ellenbogen hoch." },
+    { id:"goblet_squat",  name:"Goblet Squat",              s:{beg:15,nov:27, int:44, adv:65, pro:88, eli:113}, note:"Gewicht einer Kurzhantel oder Kettlebell. Beide Hände halten das Gewicht vor Brust." },
+    { id:"leg_press",     name:"Beinpresse",                s:{beg:86,nov:147,int:226,adv:324,pro:432,eli:550}, note:"Gesamtgewicht auf dem Schlitten – ohne Schlitten selbst." },
+    { id:"hack_squat",    name:"Hackenschmidt Squat",       s:{beg:60,nov:100,int:150,adv:210,pro:275,eli:350}, note:"Maschinengewicht auf dem Schlitten. Fußposition tief, tief in die Kniebeuge." },
+    { id:"hip_thrust",    name:"Hip Thrust",                s:{beg:38,nov:76, int:129,adv:196,pro:273,eli:350}, note:"Gesamtgewicht. Schultern auf Bank, Hüfte voll strecken und oben spannen." },
+    { id:"leg_ext",       name:"Beinstrecker",              s:{beg:35,nov:61, int:96, adv:139,pro:186,eli:235}, note:"Maschinengewicht. Beide Beine voll strecken – Quadrizeps oben zusammendrücken." },
+    { id:"leg_curl",      name:"Beinbeuger liegend",        s:{beg:23,nov:40, int:64, adv:93, pro:126,eli:160}, note:"Maschinengewicht. Bauchlage, Beine zu Gesäß ziehen." },
+    { id:"leg_curl_sit",  name:"Beinbeuger sitzend",        s:{beg:22,nov:39, int:62, adv:90, pro:121,eli:155}, note:"Maschinengewicht sitzend. Beine unter Sitz nach unten drücken." },
+    { id:"calf_raise",    name:"Wadenmaschine",             s:{beg:31,nov:72, int:134,adv:214,pro:307,eli:400}, note:"Maschinengewicht. Volles Strecken oben und tiefes Absenken – keine Hilfsbewegung." },
+    { id:"calf_raise_db", name:"Wadenheben stehend (KH)",   s:{beg:8, nov:18, int:32, adv:50, pro:70, eli:93 }, note:"Gewicht pro Kurzhantel. Einbeinig für mehr Intensität." },
+    { id:"bss",           name:"Bulg. Ausfallschritte",     s:{beg:8, nov:17, int:30, adv:46, pro:63, eli:82 }, note:"Gewicht pro Kurzhantel. Hinterer Fuß auf Bank, vorderer weit vorne.", isBilateral:false },
+    { id:"lunge",         name:"Ausfallschritte",           s:{beg:20,nov:40, int:65, adv:95, pro:130,eli:168}, note:"Gesamtgewicht (Langhantel oder Kurzhanteln gesamt). Abwechselnd vortreten." },
+    { id:"hip_adduct",    name:"Hüftadduktion (Maschine)",  s:{beg:24,nov:44, int:70, adv:100,pro:133,eli:170}, note:"Maschinengewicht. Beine langsam zusammenführen, Innenschenkel kontrolliert." },
+    { id:"hip_abduct",    name:"Hüftabduktion (Maschine)",  s:{beg:20,nov:37, int:59, adv:85, pro:113,eli:145}, note:"Maschinengewicht. Beine langsam auseinanderspreizen." },
   ],
   Shoulders: [
-    { id:"ohp",          name:"Schulterdrücken stehend", s:{beg:30,nov:45,int:64, adv:87, pro:112,eli:140}, note:"Gesamtgewicht inkl. 20 kg Stange. Drücken von Kinnhöhe über Kopf." },
-    { id:"db_press",     name:"KH Schulterdrücken",      s:{beg:10,nov:18,int:28, adv:40, pro:54, eli:70 }, note:"Gewicht pro Kurzhantel. Sitzend oder stehend über Kopf drücken." },
-    { id:"lateral",      name:"Seitheben",               s:{beg:4, nov:8, int:13, adv:19, pro:27, eli:36 }, note:"Gewicht pro Kurzhantel. Auf Schulterhöhe heben – negative Phase kontrollieren." },
-    { id:"db_shrug",     name:"KH Schulterheben",        s:{beg:14,nov:27,int:46, adv:70, pro:97, eli:125}, note:"Gewicht pro Kurzhantel. Gerade hoch shrugen, 1 Sek halten." },
-    { id:"bb_shrug",     name:"Langhantel Schulterheben",s:{beg:46,nov:82,int:131,adv:191,pro:258,eli:325}, note:"Gesamtgewicht inkl. 20 kg Stange. Gerade hoch shrugen." },
-    { id:"rear_delt_fly",name:"Hintere Schulter Flyes",  s:{beg:4, nov:8, int:13, adv:19, pro:26, eli:35 }, note:"Gewicht pro Kurzhantel. Vorgebeugt, Arme seitlich nach hinten führen." },
-    { id:"arnold_press", name:"Arnold Press",            s:{beg:8, nov:14,int:22, adv:32, pro:43, eli:56 }, note:"Gewicht pro Kurzhantel. Rotation der Hände beim Drücken nach oben." },
+    { id:"ohp",           name:"Schulterdrücken stehend",   s:{beg:33,nov:47, int:64, adv:84, pro:106,eli:132}, note:"Gesamtgewicht inkl. 20 kg Stange. Drücken von Kinnhöhe über Kopf." },
+    { id:"db_press",      name:"KH Schulterdrücken sitzend",s:{beg:10,nov:18, int:28, adv:40, pro:54, eli:70 }, note:"Gewicht pro Kurzhantel. Sitzend, Ellenbogen auf Schulterhöhe starten." },
+    { id:"arnold_press",  name:"Arnold Press",              s:{beg:8, nov:14, int:22, adv:32, pro:43, eli:56 }, note:"Gewicht pro Kurzhantel. Handflächen zu dir drehen am Start, beim Drücken drehen." },
+    { id:"lateral",       name:"Seitheben",                 s:{beg:4, nov:8,  int:13, adv:19, pro:27, eli:36 }, note:"Gewicht pro Kurzhantel. Auf Schulterhöhe heben – negative Phase langsam." },
+    { id:"cable_lateral", name:"Kabel Seitheben",           s:{beg:4, nov:8,  int:12, adv:18, pro:25, eli:33 }, note:"Gewicht pro Seite. Kabel hinter Rücken, Arm auf Schulterhöhe heben." },
+    { id:"rear_delt_fly", name:"Hintere Schulter Flyes",    s:{beg:4, nov:8,  int:13, adv:19, pro:26, eli:35 }, note:"Gewicht pro Kurzhantel. Vorgebeugt oder Pec Deck rückwärts, Ellenbogen leicht gebeugt." },
+    { id:"bb_shrug",      name:"Langhantel Schulterheben",  s:{beg:46,nov:82, int:131,adv:191,pro:258,eli:325}, note:"Gesamtgewicht inkl. 20 kg Stange. Schultern gerade nach oben – kein Rollen." },
+    { id:"db_shrug",      name:"KH Schulterheben",          s:{beg:14,nov:27, int:46, adv:70, pro:97, eli:125}, note:"Gewicht pro Kurzhantel. Schultern gerade nach oben, 1 Sek halten." },
+    { id:"machine_ohp",   name:"Schulterdrücken (Maschine)",s:{beg:22,nov:38, int:58, adv:82, pro:109,eli:140}, note:"Maschinengewicht. Geführte Bewegung über Kopf drücken." },
   ],
   Arms: [
-    { id:"bb_curl",      name:"Langhantel Curl",         s:{beg:17,nov:30,int:47, adv:68, pro:91, eli:115}, note:"Gesamtgewicht (EZ-Stange ~10 kg, gerade Stange ~20 kg). Kein Schwung." },
-    { id:"db_curl",      name:"Kurzhantel Curl",         s:{beg:6, nov:13,int:23, adv:36, pro:51, eli:65 }, note:"Gewicht pro Kurzhantel. Am höchsten Punkt supinieren (drehen).", isBilateral:false },
-    { id:"hammer",       name:"Hammer Curl",             s:{beg:8, nov:15,int:23, adv:34, pro:46, eli:60 }, note:"Gewicht pro Kurzhantel. Neutraler Griff, Daumen zeigt nach oben.", isBilateral:false },
-    { id:"preacher",     name:"Preacher Curl",           s:{beg:17,nov:29,int:46, adv:66, pro:89, eli:112}, note:"Gesamtgewicht EZ-Stange/Langhantel. Arm auf Pad, isoliert Bizeps." },
-    { id:"concentration_curl",name:"Konzentrations Curl",s:{beg:5,nov:9,int:15,adv:22,pro:30,eli:40}, note:"Gewicht pro Kurzhantel. Auf Bank sitzen, Ellenbogen innen auf Oberschenkel.", isBilateral:false },
-    { id:"cable_curl",   name:"Kabel Curl",              s:{beg:17,nov:30,int:47, adv:68, pro:91, eli:115}, note:"Kabelmaschinengewicht. Stehend, Stange zur Schulter ziehen." },
-    { id:"tricep_push",  name:"Trizeps Pushdown",        s:{beg:17,nov:34,int:57, adv:86, pro:119,eli:155}, note:"Maschinengewicht (Kabel). Ellenbogen die ganze Zeit am Körper halten." },
-    { id:"skull",        name:"Skull Crusher",           s:{beg:20,nov:33,int:49, adv:68, pro:89, eli:112}, note:"Gesamtgewicht EZ-Stange. Zur Stirn absenken, Ellenbogen stationär." },
-    { id:"overhead_tri",  name:"Trizeps über Kopf",      s:{beg:10,nov:18,int:28, adv:40, pro:54, eli:70 }, note:"Gewicht einer Kurzhantel (beide Hände). Arme strecken, Ellenbogen nah am Kopf." },
-    { id:"dips_tri",     name:"Dips (Trizeps-Fokus)",    s:{beg:0, nov:8, int:20, adv:34, pro:49, eli:65 }, note:"Anzahl WDHS Körpergewicht. Aufrechter Oberkörper für Trizeps-Fokus.", isReps:true },
-    { id:"cg_bench_tri", name:"Enges Bankdrücken (Tri)", s:{beg:47,nov:68,int:93, adv:123,pro:155,eli:190}, note:"Gesamtgewicht. Wie Bankdrücken aber Hände schulterbreit – Trizeps Fokus." },
+    { id:"bb_curl",       name:"Langhantel Curl",           s:{beg:19,nov:32, int:48, adv:67, pro:89, eli:113}, note:"Gesamtgewicht inkl. Stange (EZ ~10 kg, gerade ~20 kg). Kein Schwung." },
+    { id:"db_curl",       name:"KH Curl",                   s:{beg:7, nov:14, int:24, adv:37, pro:51, eli:66 }, note:"Gewicht pro Kurzhantel. Am höchsten Punkt supinieren (drehen).", isBilateral:false },
+    { id:"hammer",        name:"Hammer Curl",               s:{beg:8, nov:15, int:23, adv:34, pro:46, eli:60 }, note:"Gewicht pro Kurzhantel. Neutraler Griff, Daumen zeigt nach oben.", isBilateral:false },
+    { id:"preacher",      name:"Preacher Curl",             s:{beg:17,nov:29, int:46, adv:66, pro:89, eli:112}, note:"Gesamtgewicht EZ-Stange. Arm auf Pad – isoliert Bizeps vollständig." },
+    { id:"concentration_curl",name:"Konzentrations Curl",   s:{beg:5, nov:9,  int:15, adv:22, pro:30, eli:40 }, note:"Gewicht pro Kurzhantel. Sitzend, Ellenbogen innen auf Oberschenkel.", isBilateral:false },
+    { id:"cable_curl",    name:"Kabel Curl",                s:{beg:17,nov:30, int:47, adv:68, pro:91, eli:115}, note:"Kabelmaschinengewicht. Stehend, Stange zur Schulter ziehen – konstante Spannung." },
+    { id:"incline_db_curl",name:"KH Curl auf Schrägbank",   s:{beg:5, nov:9,  int:15, adv:22, pro:30, eli:40 }, note:"Gewicht pro Kurzhantel. Auf Schrägbank anlehnen – maximale Streckung.", isBilateral:false },
+    { id:"tricep_push",   name:"Trizeps Pushdown",          s:{beg:17,nov:34, int:57, adv:86, pro:119,eli:155}, note:"Maschinengewicht (Kabel). Ellenbogen die ganze Zeit am Körper halten." },
+    { id:"skull",         name:"Skull Crusher",             s:{beg:20,nov:33, int:49, adv:68, pro:89, eli:112}, note:"Gesamtgewicht EZ-Stange. Zur Stirn absenken, Ellenbogen stationär halten." },
+    { id:"overhead_tri",  name:"Trizeps über Kopf",         s:{beg:10,nov:18, int:28, adv:40, pro:54, eli:70 }, note:"Gewicht einer Kurzhantel (beide Hände). Ellenbogen nah am Kopf." },
+    { id:"dips_tri",      name:"Dips (Trizeps-Fokus)",      s:{beg:0, nov:8,  int:20, adv:34, pro:49, eli:65 }, note:"Anzahl WDHS Körpergewicht. Aufrechter Oberkörper für Trizeps-Fokus.", isReps:true },
+    { id:"tricep_kickback",name:"Trizeps Kickback",         s:{beg:3, nov:6,  int:10, adv:15, pro:21, eli:28 }, note:"Gewicht pro Kurzhantel. Vorgebeugt, Arm nach hinten strecken – Ellenbogen fest.", isBilateral:false },
+    { id:"wrist_curl",    name:"Handgelenk Curl",           s:{beg:10,nov:18, int:28, adv:41, pro:55, eli:70 }, note:"Gesamtgewicht Langhantel. Unterarme auf Knien, Handgelenke nach oben curlen." },
   ],
   Core: [
-    { id:"cable_crunch", name:"Kabelzug Crunch",         s:{beg:15,nov:25,int:38, adv:55, pro:75, eli:95 }, note:"Maschinengewicht. Kniend, Seil nach unten cruncen, Abs zusammendrücken." },
-    { id:"leg_raise",    name:"Hängendes Beinheben",     s:{beg:0, nov:5, int:10, adv:15, pro:20, eli:25 }, note:"Anzahl WDHS Körpergewicht. Hängen, Beine gestreckt auf Höhe der Hüfte.", isReps:true },
-    { id:"ab_wheel",     name:"Bauchroller",             s:{beg:0, nov:5, int:12, adv:20, pro:28, eli:35 }, note:"Anzahl WDHS. So weit wie möglich ausrollen, Core angespannt.", isReps:true },
-    { id:"plank",        name:"Plank",                   s:{beg:20,nov:45,int:90, adv:150,pro:210,eli:300}, note:"Sekunden halten. Körper gerade wie ein Brett, Core und Gesäß anspannen.", isReps:true },
-    { id:"sit_up",       name:"Sit-Ups",                 s:{beg:10,nov:25,int:50, adv:80, pro:110,eli:150}, note:"Anzahl WDHS. Hände hinter Kopf, vollständig aufrichten.", isReps:true },
-    { id:"russian_twist",name:"Russian Twist",           s:{beg:5, nov:10,int:18, adv:28, pro:40, eli:53 }, note:"Gewicht des Gewichtsscheibe/Medizinball (kg). Sitzend, hin und her rotieren." },
-  ],
-  Cardio: [
-    { id:"run_1k",       name:"1 km Laufen",             s:{beg:8, nov:6, int:5,  adv:4,  pro:3.5,eli:3  }, note:"Minuten für 1 km. Weniger = besser (Zeitübung). Z.B. 5:30 = 5.5 eingeben.", isReps:true, lowerIsBetter:true },
-    { id:"run_5k",       name:"5 km Laufen",             s:{beg:40,nov:30,int:25, adv:22, pro:19, eli:16 }, note:"Minuten für 5 km. Weniger = besser. Z.B. 25:30 = 25.5 eingeben.", isReps:true, lowerIsBetter:true },
-    { id:"row_500m",     name:"Rudern 500m",             s:{beg:2.5,nov:2,int:1.7,adv:1.5,pro:1.35,eli:1.2}, note:"Minuten für 500m Ruderergometer. Weniger = besser.", isReps:true, lowerIsBetter:true },
+    { id:"cable_crunch",  name:"Kabelzug Crunch",           s:{beg:15,nov:25, int:38, adv:55, pro:75, eli:95 }, note:"Maschinengewicht. Kniend, Seil nach unten cruncen, Abs zusammendrücken." },
+    { id:"leg_raise",     name:"Hängendes Beinheben",       s:{beg:1, nov:5,  int:10, adv:16, pro:22, eli:30 }, note:"Anzahl WDHS Körpergewicht. Hängen, Beine gestreckt auf Hüfthöhe heben.", isReps:true },
+    { id:"ab_wheel",      name:"Bauchroller",               s:{beg:1, nov:5,  int:12, adv:20, pro:28, eli:35 }, note:"Anzahl WDHS. So weit wie möglich ausrollen, Core angespannt halten.", isReps:true },
+    { id:"plank",         name:"Plank",                     s:{beg:20,nov:45, int:90, adv:150,pro:210,eli:300}, note:"Sekunden halten. Körper gerade wie ein Brett, Core und Gesäß anspannen.", isReps:true },
+    { id:"sit_up",        name:"Sit-Ups",                   s:{beg:10,nov:25, int:50, adv:80, pro:110,eli:150}, note:"Anzahl WDHS. Hände hinter Kopf, vollständig aufrichten.", isReps:true },
+    { id:"russian_twist", name:"Russian Twist",             s:{beg:5, nov:10, int:18, adv:28, pro:40, eli:53 }, note:"Gewicht einer Scheibe/Medizinball (kg). Sitzend hin und her rotieren." },
+    { id:"decline_crunch",name:"Decline Crunch",            s:{beg:0, nov:5,  int:14, adv:26, pro:41, eli:58 }, note:"Anzahl WDHS am Schrägbrett (Kopf unten). Hände an Schläfen, Core zusammendrücken.", isReps:true },
+    { id:"dragon_flag",   name:"Dragon Flag",               s:{beg:0, nov:1,  int:5,  adv:10, pro:16, eli:23 }, note:"Anzahl WDHS Körpergewicht. Schultern auf Bank, Körper gestreckt anheben – Elite Übung.", isReps:true },
   ],
 };
 
@@ -251,7 +262,7 @@ html,body{background:var(--bg);-webkit-text-size-adjust:100%}
 
 /* header – pushed down below camera island */
 .hdr{display:flex;align-items:center;justify-content:space-between;
-  padding-top:calc(var(--safe-top) + 52px);
+  padding-top:calc(var(--safe-top) + 14px);
   padding-bottom:12px;padding-left:20px;padding-right:20px;
   background:var(--bg2);border-bottom:1px solid var(--bdr)}
 .logo{font-family:var(--head);font-size:26px;font-weight:800;letter-spacing:1px;color:#fff;line-height:1}
@@ -490,7 +501,7 @@ function DashboardTab({ prs, sessions, onNavigate, userProfile }) {
   const fact=useMemo(()=>FUN_FACTS[new Date().getDate()%FUN_FACTS.length],[]);
   const strongest=[...muscleScores].filter(m=>m.score>0).sort((a,b)=>b.score-a.score)[0];
   const weakest  =[...muscleScores].filter(m=>m.score>0).sort((a,b)=>a.score-b.score)[0];
-  const ICONS={Chest:"◈",Back:"◉",Legs:"◆",Shoulders:"◇",Arms:"◈",Core:"◎",Cardio:"⬡"};
+  const ICONS={Chest:"◈",Back:"◉",Legs:"◆",Shoulders:"◇",Arms:"◈",Core:"◎"};
 
   // Last session calories
   const lastSession = sessions[0];
