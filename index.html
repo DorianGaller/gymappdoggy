@@ -1,43 +1,35 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- Zoom completely disabled – fixes rotation/focus zoom issues -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="IronRank" />
   <meta name="theme-color" content="#07090e" />
   <meta name="description" content="Track your PRs, rank your strength against millions of lifters worldwide." />
-
   <title>IronRank – Strength Tracker</title>
-
-  <!-- PWA manifest -->
   <link rel="manifest" href="/manifest.json" />
-
-  <!-- Apple touch icon (shown on iOS home screen) -->
   <link rel="apple-touch-icon" href="/icons/icon-180.png" />
   <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
-
-  <!-- Splash screen color on iOS -->
   <style>
-    * { -webkit-tap-highlight-color: transparent; }
+    * { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    /* Prevent zoom on input focus (iOS) */
+    input, select, textarea { font-size: 16px !important; }
     body { margin: 0; background: #07090e; overscroll-behavior: none; }
     #root { min-height: 100vh; }
-    /* iOS safe area padding */
     .app { padding-bottom: env(safe-area-inset-bottom); }
   </style>
 </head>
 <body>
   <div id="root"></div>
-
-  <!-- React via CDN (no build step needed) -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel standalone to parse JSX in-browser -->
   <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 
   <script type="text/babel">
-const { useState, useMemo, useEffect } = React;
+const { useState, useMemo, useEffect, useCallback, useRef } = React;
 
 /* ═══════════════════════════════════════════════════════════  RANK SYSTEM  */
 const RANKS = [
@@ -53,167 +45,195 @@ const getNextRank= p => RANKS.find(r => p < r.pct) || null;
 
 /* ═══════════════════════════════════════════════════════════  SCORE CALC  */
 const epley1RM = (w, r) => w * (1 + Math.min(r, 30) / 30);
-const scoreFromThresholds = (val, [t0, t1, t2, t3, t4, t5]) => {
-  const thresholds = [0, t0, t1, t2, t3, t4, t5];
-  const pctBands   = [0, 20, 40, 60, 80, 95, 100];
+const scoreFromThresholds = (val, [t0,t1,t2,t3,t4,t5]) => {
+  const thresholds = [0,t0,t1,t2,t3,t4,t5];
+  const pctBands   = [0,20,40,60,80,95,100];
   for (let i = 1; i < thresholds.length; i++) {
     if (val <= thresholds[i]) {
-      const lo = thresholds[i-1], hi = thresholds[i];
-      const t  = lo === hi ? 1 : (val - lo) / (hi - lo);
-      return Math.round((pctBands[i-1] + t * (pctBands[i] - pctBands[i-1])) * 10) / 10;
+      const lo=thresholds[i-1], hi=thresholds[i];
+      const t=lo===hi?1:(val-lo)/(hi-lo);
+      return Math.round((pctBands[i-1]+t*(pctBands[i]-pctBands[i-1]))*10)/10;
     }
   }
   return 100;
 };
-const calcScore = (weight, reps, s) => {
-  if (!weight || !reps || weight <= 0 || reps <= 0) return 0;
-  const e1rm = epley1RM(weight, reps);
-  return Math.min(100, scoreFromThresholds(e1rm, [s.beg,s.nov,s.int,s.adv,s.pro,s.eli]));
+const calcScore = (weight,reps,s) => {
+  if (!weight||!reps||weight<=0||reps<=0) return 0;
+  const e1rm=epley1RM(weight,reps);
+  return Math.min(100, scoreFromThresholds(e1rm,[s.beg,s.nov,s.int,s.adv,s.pro,s.eli]));
 };
-const calcRepsScore = (reps, s) => {
-  if (!reps || reps <= 0) return 0;
-  return Math.min(100, scoreFromThresholds(reps, [s.beg,s.nov,s.int,s.adv,s.pro,s.eli]));
+const calcRepsScore = (reps,s) => {
+  if (!reps||reps<=0) return 0;
+  return Math.min(100, scoreFromThresholds(reps,[s.beg,s.nov,s.int,s.adv,s.pro,s.eli]));
 };
-const getExScore = (ex, pr) => {
+const getExScore = (ex,pr) => {
   if (!pr) return 0;
-  return ex.isReps ? calcRepsScore(pr.reps, ex.s) : calcScore(pr.weight, pr.reps, ex.s);
+  return ex.isReps ? calcRepsScore(pr.reps,ex.s) : calcScore(pr.weight,pr.reps,ex.s);
+};
+const scoreToTopPct = s => {
+  if (s<=0) return 100;
+  if (s>=95) return 1;
+  if (s>=80) return Math.round(1+(95-s)/15*9);
+  if (s>=60) return Math.round(10+(80-s)/20*20);
+  if (s>=40) return Math.round(30+(60-s)/20*30);
+  if (s>=20) return Math.round(60+(40-s)/20*30);
+  return Math.round(90+(20-s)/20*10);
 };
 
-/* ─── top % mapping: score 0→100 maps to top 100%→top 0.5% ─── */
-const scoreToTopPct = s => {
-  if (s <= 0)  return 100;
-  if (s >= 95) return 1;
-  if (s >= 80) return Math.round(1 + (95 - s) / 15 * 9);
-  if (s >= 60) return Math.round(10 + (80 - s) / 20 * 20);
-  if (s >= 40) return Math.round(30 + (60 - s) / 20 * 30);
-  if (s >= 20) return Math.round(60 + (40 - s) / 20 * 30);
-  return Math.round(90 + (20 - s) / 20 * 10);
+/* Kalorienschätzung pro Session */
+const estimateCalories = (session, bodyweightKg=80) => {
+  if (!session || !session.exercises) return 0;
+  let total = 0;
+  session.exercises.forEach(e => {
+    e.sets.forEach(st => {
+      const w = st.weight || 0;
+      const r = st.reps || 0;
+      // MET-basierte Näherung: ~5 kcal/min bei Krafttraining
+      // Schätzung: (Gewicht * Wiederholungen * 0.00035) + Basisverbrauch pro Satz
+      const setTime = r * 3; // ~3 Sekunden pro Rep
+      const met = w > 0 ? 5 + (w / bodyweightKg) * 2 : 4;
+      total += (met * bodyweightKg * 3.5 / 200) * (setTime / 60);
+    });
+  });
+  return Math.round(Math.max(total, session.exercises.length * 12));
 };
 
 /* ═══════════════════════════════════════════════════════════  EXERCISES  */
 const EX = {
   Chest: [
-    { id:"bench",        name:"Bench Press",             s:{beg:47, nov:70, int:98,  adv:132,pro:169,eli:210}, note:"Total barbell weight incl. 20 kg bar. Classic flat-bench press." },
-    { id:"incline_bench",name:"Incline Bench Press",     s:{beg:44, nov:64, int:89,  adv:118,pro:149,eli:185}, note:"Total barbell weight incl. 20 kg bar. Bench set to ~30–45°." },
-    { id:"close_bench",  name:"Close-Grip Bench",        s:{beg:47, nov:68, int:93,  adv:123,pro:155,eli:190}, note:"Total barbell weight. Hands shoulder-width apart — heavy tricep focus." },
-    { id:"db_bench",     name:"Dumbbell Bench Press",    s:{beg:16, nov:27, int:41,  adv:57, pro:75, eli:95 }, note:"Weight per dumbbell (each hand separately). E.g. enter 30 if using 2 × 30 kg." },
-    { id:"db_incline",   name:"Incline DB Press",        s:{beg:13, nov:22, int:34,  adv:48, pro:63, eli:80 }, note:"Weight per dumbbell (each hand). Bench at 30–45°." },
-    { id:"db_fly",       name:"Dumbbell Fly",            s:{beg:6,  nov:13, int:24,  adv:37, pro:52, eli:68 }, note:"Weight per dumbbell (each hand). Slight elbow bend, wide arc down and up." },
-    { id:"pushups",      name:"Push-Ups",                s:{beg:1,  nov:18, int:41,  adv:68, pro:99, eli:130}, note:"Number of REPS with bodyweight, no extra weight. Full chest-to-floor range.", isReps:true },
-    { id:"dips",         name:"Dips",                    s:{beg:0,  nov:8,  int:20,  adv:34, pro:49, eli:65 }, note:"Number of REPS with bodyweight (no added weight). Full lockout at top.", isReps:true },
+    { id:"bench",        name:"Bench Press",             s:{beg:47,nov:70,int:98, adv:132,pro:169,eli:210}, note:"Gesamtgewicht inkl. 20 kg Stange. Klassisches flaches Bankdrücken." },
+    { id:"incline_bench",name:"Schrägbankdrücken",       s:{beg:44,nov:64,int:89, adv:118,pro:149,eli:185}, note:"Gesamtgewicht inkl. 20 kg Stange. Bank auf ca. 30–45° eingestellt." },
+    { id:"close_bench",  name:"Enges Bankdrücken",       s:{beg:47,nov:68,int:93, adv:123,pro:155,eli:190}, note:"Gesamtgewicht. Hände schulterbreit – Trizeps-Fokus." },
+    { id:"db_bench",     name:"Kurzhantel Bankdrücken",  s:{beg:16,nov:27,int:41, adv:57, pro:75, eli:95 }, note:"Gewicht pro Kurzhantel. Z.B. 30 eingeben wenn du 2×30 kg verwendest." },
+    { id:"db_incline",   name:"KH Schrägbank Drücken",   s:{beg:13,nov:22,int:34, adv:48, pro:63, eli:80 }, note:"Gewicht pro Kurzhantel. Bank bei 30–45°." },
+    { id:"db_fly",       name:"Kurzhantel Flyes",        s:{beg:6, nov:13,int:24, adv:37, pro:52, eli:68 }, note:"Gewicht pro Kurzhantel. Leichte Ellenbogenbeugung, weiter Bogen." },
+    { id:"cable_fly",    name:"Kabelzug Flyes",          s:{beg:10,nov:18,int:28, adv:40, pro:54, eli:70 }, note:"Gewicht pro Seite. Kabel auf Brusthöhe, Arme zusammenführen." },
+    { id:"chest_dip",    name:"Dips (Brust-Fokus)",      s:{beg:0, nov:8, int:20, adv:34, pro:49, eli:65 }, note:"Anzahl WDHS Körpergewicht. Oberkörper leicht vorgebeugt für Brust-Fokus.", isReps:true },
+    { id:"pushups",      name:"Liegestütze",             s:{beg:1, nov:18,int:41, adv:68, pro:99, eli:130}, note:"Anzahl WDHS Körpergewicht, volles Bewegungsausmaß.", isReps:true },
+    { id:"dips",         name:"Dips",                    s:{beg:0, nov:8, int:20, adv:34, pro:49, eli:65 }, note:"Anzahl WDHS Körpergewicht. Volles Strecken oben.", isReps:true },
   ],
   Back: [
-    { id:"deadlift",     name:"Deadlift",                s:{beg:78, nov:112,int:152, adv:200,pro:250,eli:305}, note:"Total barbell weight incl. 20 kg bar. Pull from floor, full lockout at top." },
-    { id:"bent_row",     name:"Bent-Over Row",           s:{beg:41, nov:60, int:85,  adv:115,pro:147,eli:183}, note:"Total barbell weight incl. 20 kg bar. Torso ~parallel to floor." },
-    { id:"lat_pulldown", name:"Lat Pulldown",            s:{beg:38, nov:58, int:82,  adv:110,pro:141,eli:175}, note:"Machine stack weight. Pull bar down to upper chest, squeeze lats." },
-    { id:"seated_row",   name:"Seated Cable Row",        s:{beg:41, nov:61, int:86,  adv:115,pro:147,eli:183}, note:"Machine stack weight. Pull handle to your lower abdomen, keep back straight." },
-    { id:"pullup",       name:"Pull-Ups",                s:{beg:0,  nov:5,  int:14,  adv:25, pro:37, eli:50 }, note:"Number of REPS, bodyweight only (overhand grip). Enter 0 if not yet possible.", isReps:true },
-    { id:"chinup",       name:"Chin-Ups",                s:{beg:0,  nov:6,  int:14,  adv:24, pro:35, eli:48 }, note:"Number of REPS, bodyweight only (underhand/supinated grip).", isReps:true },
-    { id:"db_row",       name:"Dumbbell Row",            s:{beg:16, nov:27, int:43,  adv:62, pro:83, eli:105}, note:"Weight per dumbbell (one arm at a time). Brace other hand on bench." },
-    { id:"rdl",          name:"Romanian Deadlift",       s:{beg:55, nov:84, int:120, adv:164,pro:211,eli:260}, note:"Total barbell weight. Keep slight knee bend, push hips back — not a squat." },
+    { id:"deadlift",     name:"Kreuzheben",              s:{beg:78,nov:112,int:152,adv:200,pro:250,eli:305}, note:"Gesamtgewicht inkl. 20 kg Stange. Vom Boden ziehen, volles Strecken oben." },
+    { id:"bent_row",     name:"Vorgebeugtes Rudern",     s:{beg:41,nov:60,int:85, adv:115,pro:147,eli:183}, note:"Gesamtgewicht inkl. 20 kg Stange. Oberkörper ca. parallel zum Boden." },
+    { id:"lat_pulldown", name:"Latzug",                  s:{beg:38,nov:58,int:82, adv:110,pro:141,eli:175}, note:"Maschinengewicht. Stange zur Oberbrust ziehen, Lats zusammendrücken." },
+    { id:"seated_row",   name:"Kabelzug sitzend",        s:{beg:41,nov:61,int:86, adv:115,pro:147,eli:183}, note:"Maschinengewicht. Griff zum Unterbauch ziehen, Rücken gerade." },
+    { id:"pullup",       name:"Klimmzüge",               s:{beg:0, nov:5, int:14, adv:25, pro:37, eli:50 }, note:"Anzahl WDHS Körpergewicht (Obergriff). 0 eingeben wenn noch nicht möglich.", isReps:true },
+    { id:"chinup",       name:"Chin-Ups",                s:{beg:0, nov:6, int:14, adv:24, pro:35, eli:48 }, note:"Anzahl WDHS Körpergewicht (Untergriff).", isReps:true },
+    { id:"db_row",       name:"Kurzhantel Rudern",       s:{beg:16,nov:27,int:43, adv:62, pro:83, eli:105}, note:"Gewicht pro Kurzhantel (ein Arm). Andere Hand auf Bank abstützen." },
+    { id:"rdl",          name:"Rumänisches Kreuzheben",  s:{beg:55,nov:84,int:120,adv:164,pro:211,eli:260}, note:"Gesamtgewicht. Leichte Kniebeugung, Hüfte zurückschieben." },
+    { id:"tbar_row",     name:"T-Bar Rudern",            s:{beg:38,nov:60,int:88, adv:120,pro:155,eli:193}, note:"Gewicht auf der Stange (ohne Stange). Brustpad für geführte Version." },
+    { id:"facepull",     name:"Face Pull",               s:{beg:15,nov:28,int:45, adv:65, pro:88, eli:113}, note:"Kabelgewicht. Seil zur Stirn ziehen, Ellenbogen hoch." },
   ],
   Legs: [
-    { id:"squat",        name:"Back Squat",              s:{beg:64, nov:93, int:130, adv:173,pro:219,eli:270}, note:"Total barbell weight incl. 20 kg bar. Bar on upper back, squat to parallel or below." },
-    { id:"leg_press",    name:"Leg Press (Sled)",        s:{beg:86, nov:147,int:226, adv:324,pro:432,eli:550}, note:"Total weight on the sled — does NOT include the sled machine itself." },
-    { id:"hip_thrust",   name:"Hip Thrust",              s:{beg:38, nov:76, int:129, adv:196,pro:273,eli:350}, note:"Total barbell weight. Shoulders on bench, drive hips to full lockout." },
-    { id:"front_squat",  name:"Front Squat",             s:{beg:47, nov:70, int:99,  adv:134,pro:172,eli:215}, note:"Total barbell weight incl. 20 kg bar. Bar on front delts, elbows up." },
-    { id:"leg_ext",      name:"Leg Extension",           s:{beg:35, nov:61, int:96,  adv:139,pro:186,eli:235}, note:"Machine stack weight. Extend both legs fully — squeeze quads at top." },
-    { id:"leg_curl",     name:"Lying Leg Curl",          s:{beg:23, nov:40, int:64,  adv:93, pro:126,eli:160}, note:"Machine stack weight. Lie face-down, curl both legs toward glutes." },
-    { id:"calf_raise",   name:"Machine Calf Raise",      s:{beg:31, nov:72, int:134, adv:214,pro:307,eli:400}, note:"Machine stack weight (standing calf raise machine). Full stretch at bottom, full extension at top." },
-    { id:"bss",          name:"Bulgarian Split Squat",   s:{beg:8,  nov:17, int:30,  adv:46, pro:63, eli:82 }, note:"Weight per dumbbell (each hand). Rear foot elevated on bench, front foot far forward." },
+    { id:"squat",        name:"Kniebeuge",               s:{beg:64,nov:93,int:130,adv:173,pro:219,eli:270}, note:"Gesamtgewicht inkl. 20 kg Stange. Stange auf Schultern, parallel oder tiefer." },
+    { id:"leg_press",    name:"Beinpresse",              s:{beg:86,nov:147,int:226,adv:324,pro:432,eli:550}, note:"Gesamtgewicht auf dem Schlitten – ohne Schlitten selbst." },
+    { id:"hip_thrust",   name:"Hip Thrust",              s:{beg:38,nov:76,int:129,adv:196,pro:273,eli:350}, note:"Gesamtgewicht. Schultern auf Bank, Hüfte voll strecken." },
+    { id:"front_squat",  name:"Front Squat",             s:{beg:47,nov:70,int:99, adv:134,pro:172,eli:215}, note:"Gesamtgewicht inkl. 20 kg Stange. Stange auf Vorderdelt, Ellenbogen hoch." },
+    { id:"leg_ext",      name:"Beinstrecker",            s:{beg:35,nov:61,int:96, adv:139,pro:186,eli:235}, note:"Maschinengewicht. Beide Beine voll strecken – Quadrizeps oben zusammendrücken." },
+    { id:"leg_curl",     name:"Beinbeuger liegend",      s:{beg:23,nov:40,int:64, adv:93, pro:126,eli:160}, note:"Maschinengewicht. Bauchlage, Beine zu Gesäß ziehen." },
+    { id:"calf_raise",   name:"Wadenmaschine",           s:{beg:31,nov:72,int:134,adv:214,pro:307,eli:400}, note:"Maschinengewicht. Volles Strecken und Absenken." },
+    { id:"bss",          name:"Bulgarische Ausfallschritte",s:{beg:8,nov:17,int:30,adv:46,pro:63,eli:82}, note:"Gewicht pro Kurzhantel. Hinterer Fuß auf Bank, vorderer weit vorne.", isBilateral:false },
+    { id:"lunge",        name:"Ausfallschritte",         s:{beg:20,nov:40,int:65, adv:95, pro:130,eli:168}, note:"Gesamtgewicht (Hantelstange oder Kurzhanteln gesamt). Abwechselnd vortreten." },
+    { id:"hack_squat",   name:"Hackenschmidt Squat",     s:{beg:60,nov:100,int:150,adv:210,pro:275,eli:350}, note:"Maschinengewicht auf dem Schlitten. Fußposition tief, tief in die Kniebeuge." },
   ],
   Shoulders: [
-    { id:"ohp",          name:"Overhead Press",          s:{beg:30, nov:45, int:64,  adv:87, pro:112,eli:140}, note:"Total barbell weight incl. 20 kg bar. Press from chin-level overhead to full lockout." },
-    { id:"db_press",     name:"DB Shoulder Press",       s:{beg:10, nov:18, int:28,  adv:40, pro:54, eli:70 }, note:"Weight per dumbbell (each hand). Seated or standing, press overhead." },
-    { id:"lateral",      name:"Lateral Raise",           s:{beg:4,  nov:8,  int:13,  adv:19, pro:27, eli:36 }, note:"Weight per dumbbell (each hand). Raise to shoulder height — control the negative." },
-    { id:"db_shrug",     name:"Dumbbell Shrug",          s:{beg:14, nov:27, int:46,  adv:70, pro:97, eli:125}, note:"Weight per dumbbell (each hand). Shrug straight up, hold 1 sec at top." },
-    { id:"bb_shrug",     name:"Barbell Shrug",           s:{beg:46, nov:82, int:131, adv:191,pro:258,eli:325}, note:"Total barbell weight incl. 20 kg bar. Shrug straight up, no rolling shoulders." },
+    { id:"ohp",          name:"Schulterdrücken stehend", s:{beg:30,nov:45,int:64, adv:87, pro:112,eli:140}, note:"Gesamtgewicht inkl. 20 kg Stange. Drücken von Kinnhöhe über Kopf." },
+    { id:"db_press",     name:"KH Schulterdrücken",      s:{beg:10,nov:18,int:28, adv:40, pro:54, eli:70 }, note:"Gewicht pro Kurzhantel. Sitzend oder stehend über Kopf drücken." },
+    { id:"lateral",      name:"Seitheben",               s:{beg:4, nov:8, int:13, adv:19, pro:27, eli:36 }, note:"Gewicht pro Kurzhantel. Auf Schulterhöhe heben – negative Phase kontrollieren." },
+    { id:"db_shrug",     name:"KH Schulterheben",        s:{beg:14,nov:27,int:46, adv:70, pro:97, eli:125}, note:"Gewicht pro Kurzhantel. Gerade hoch shrugen, 1 Sek halten." },
+    { id:"bb_shrug",     name:"Langhantel Schulterheben",s:{beg:46,nov:82,int:131,adv:191,pro:258,eli:325}, note:"Gesamtgewicht inkl. 20 kg Stange. Gerade hoch shrugen." },
+    { id:"rear_delt_fly",name:"Hintere Schulter Flyes",  s:{beg:4, nov:8, int:13, adv:19, pro:26, eli:35 }, note:"Gewicht pro Kurzhantel. Vorgebeugt, Arme seitlich nach hinten führen." },
+    { id:"arnold_press", name:"Arnold Press",            s:{beg:8, nov:14,int:22, adv:32, pro:43, eli:56 }, note:"Gewicht pro Kurzhantel. Rotation der Hände beim Drücken nach oben." },
   ],
   Arms: [
-    { id:"bb_curl",      name:"Barbell Curl",            s:{beg:17, nov:30, int:47,  adv:68, pro:91, eli:115}, note:"Total barbell/EZ-bar weight (EZ-bar ~10 kg, straight bar ~20 kg). No body swing." },
-    { id:"db_curl",      name:"Dumbbell Curl",           s:{beg:6,  nov:13, int:23,  adv:36, pro:51, eli:65 }, note:"Weight per dumbbell (each hand). Supinate (rotate) at the peak." },
-    { id:"hammer",       name:"Hammer Curl",             s:{beg:8,  nov:15, int:23,  adv:34, pro:46, eli:60 }, note:"Weight per dumbbell (each hand). Neutral grip throughout — thumbs pointing up." },
-    { id:"preacher",     name:"Preacher Curl",           s:{beg:17, nov:29, int:46,  adv:66, pro:89, eli:112}, note:"Total EZ-bar/barbell weight. Arm rests on pad, isolates bicep fully." },
-    { id:"tricep_push",  name:"Tricep Pushdown",         s:{beg:17, nov:34, int:57,  adv:86, pro:119,eli:155}, note:"Machine stack weight (cable). Keep elbows pinned to sides throughout." },
-    { id:"skull",        name:"Skull Crusher",           s:{beg:20, nov:33, int:49,  adv:68, pro:89, eli:112}, note:"Total EZ-bar/barbell weight. Lower to forehead, elbows stationary." },
-    { id:"cg_bench_tri", name:"Close-Grip Bench (Tri)",  s:{beg:47, nov:68, int:93,  adv:123,pro:155,eli:190}, note:"Total barbell weight. Like bench press but hands shoulder-width — tricep focus." },
+    { id:"bb_curl",      name:"Langhantel Curl",         s:{beg:17,nov:30,int:47, adv:68, pro:91, eli:115}, note:"Gesamtgewicht (EZ-Stange ~10 kg, gerade Stange ~20 kg). Kein Schwung." },
+    { id:"db_curl",      name:"Kurzhantel Curl",         s:{beg:6, nov:13,int:23, adv:36, pro:51, eli:65 }, note:"Gewicht pro Kurzhantel. Am höchsten Punkt supinieren (drehen).", isBilateral:false },
+    { id:"hammer",       name:"Hammer Curl",             s:{beg:8, nov:15,int:23, adv:34, pro:46, eli:60 }, note:"Gewicht pro Kurzhantel. Neutraler Griff, Daumen zeigt nach oben.", isBilateral:false },
+    { id:"preacher",     name:"Preacher Curl",           s:{beg:17,nov:29,int:46, adv:66, pro:89, eli:112}, note:"Gesamtgewicht EZ-Stange/Langhantel. Arm auf Pad, isoliert Bizeps." },
+    { id:"concentration_curl",name:"Konzentrations Curl",s:{beg:5,nov:9,int:15,adv:22,pro:30,eli:40}, note:"Gewicht pro Kurzhantel. Auf Bank sitzen, Ellenbogen innen auf Oberschenkel.", isBilateral:false },
+    { id:"cable_curl",   name:"Kabel Curl",              s:{beg:17,nov:30,int:47, adv:68, pro:91, eli:115}, note:"Kabelmaschinengewicht. Stehend, Stange zur Schulter ziehen." },
+    { id:"tricep_push",  name:"Trizeps Pushdown",        s:{beg:17,nov:34,int:57, adv:86, pro:119,eli:155}, note:"Maschinengewicht (Kabel). Ellenbogen die ganze Zeit am Körper halten." },
+    { id:"skull",        name:"Skull Crusher",           s:{beg:20,nov:33,int:49, adv:68, pro:89, eli:112}, note:"Gesamtgewicht EZ-Stange. Zur Stirn absenken, Ellenbogen stationär." },
+    { id:"overhead_tri",  name:"Trizeps über Kopf",      s:{beg:10,nov:18,int:28, adv:40, pro:54, eli:70 }, note:"Gewicht einer Kurzhantel (beide Hände). Arme strecken, Ellenbogen nah am Kopf." },
+    { id:"dips_tri",     name:"Dips (Trizeps-Fokus)",    s:{beg:0, nov:8, int:20, adv:34, pro:49, eli:65 }, note:"Anzahl WDHS Körpergewicht. Aufrechter Oberkörper für Trizeps-Fokus.", isReps:true },
+    { id:"cg_bench_tri", name:"Enges Bankdrücken (Tri)", s:{beg:47,nov:68,int:93, adv:123,pro:155,eli:190}, note:"Gesamtgewicht. Wie Bankdrücken aber Hände schulterbreit – Trizeps Fokus." },
   ],
   Core: [
-    { id:"cable_crunch", name:"Cable Crunch",            s:{beg:15, nov:25, int:38,  adv:55, pro:75, eli:95 }, note:"Machine stack weight. Kneel, pull rope down, crunch abs toward knees." },
-    { id:"leg_raise",    name:"Hanging Leg Raise",       s:{beg:0,  nov:5,  int:10,  adv:15, pro:20, eli:25 }, note:"Number of REPS bodyweight. Hang from bar, raise straight legs to parallel or higher.", isReps:true },
-    { id:"ab_wheel",     name:"Ab Wheel Rollout",        s:{beg:0,  nov:5,  int:12,  adv:20, pro:28, eli:35 }, note:"Number of REPS. Roll out as far as possible from knees or toes, keep core tight.", isReps:true },
+    { id:"cable_crunch", name:"Kabelzug Crunch",         s:{beg:15,nov:25,int:38, adv:55, pro:75, eli:95 }, note:"Maschinengewicht. Kniend, Seil nach unten cruncen, Abs zusammendrücken." },
+    { id:"leg_raise",    name:"Hängendes Beinheben",     s:{beg:0, nov:5, int:10, adv:15, pro:20, eli:25 }, note:"Anzahl WDHS Körpergewicht. Hängen, Beine gestreckt auf Höhe der Hüfte.", isReps:true },
+    { id:"ab_wheel",     name:"Bauchroller",             s:{beg:0, nov:5, int:12, adv:20, pro:28, eli:35 }, note:"Anzahl WDHS. So weit wie möglich ausrollen, Core angespannt.", isReps:true },
+    { id:"plank",        name:"Plank",                   s:{beg:20,nov:45,int:90, adv:150,pro:210,eli:300}, note:"Sekunden halten. Körper gerade wie ein Brett, Core und Gesäß anspannen.", isReps:true },
+    { id:"sit_up",       name:"Sit-Ups",                 s:{beg:10,nov:25,int:50, adv:80, pro:110,eli:150}, note:"Anzahl WDHS. Hände hinter Kopf, vollständig aufrichten.", isReps:true },
+    { id:"russian_twist",name:"Russian Twist",           s:{beg:5, nov:10,int:18, adv:28, pro:40, eli:53 }, note:"Gewicht des Gewichtsscheibe/Medizinball (kg). Sitzend, hin und her rotieren." },
+  ],
+  Cardio: [
+    { id:"run_1k",       name:"1 km Laufen",             s:{beg:8, nov:6, int:5,  adv:4,  pro:3.5,eli:3  }, note:"Minuten für 1 km. Weniger = besser (Zeitübung). Z.B. 5:30 = 5.5 eingeben.", isReps:true, lowerIsBetter:true },
+    { id:"run_5k",       name:"5 km Laufen",             s:{beg:40,nov:30,int:25, adv:22, pro:19, eli:16 }, note:"Minuten für 5 km. Weniger = besser. Z.B. 25:30 = 25.5 eingeben.", isReps:true, lowerIsBetter:true },
+    { id:"row_500m",     name:"Rudern 500m",             s:{beg:2.5,nov:2,int:1.7,adv:1.5,pro:1.35,eli:1.2}, note:"Minuten für 500m Ruderergometer. Weniger = besser.", isReps:true, lowerIsBetter:true },
   ],
 };
 
-const ALL_EX = Object.entries(EX).flatMap(([m, list]) => list.map(e => ({ ...e, muscle: m })));
+const ALL_EX = Object.entries(EX).flatMap(([m,list]) => list.map(e => ({ ...e, muscle:m })));
 const MUSCLES = Object.keys(EX);
 
 const getMuscleScore = (muscle, prs) => {
   const list = EX[muscle] || [];
-  return list.reduce((best, ex) => Math.max(best, getExScore(ex, prs[ex.id])), 0);
+  return list.reduce((best,ex) => Math.max(best, getExScore(ex, prs[ex.id])), 0);
 };
 
 /* ═══════════════════════════════════════════════════════════  ACHIEVEMENTS  */
 const ACHIEVEMENTS = [
-  // Beginner milestones
-  { id:"first_pr",    icon:"🌱", title:"First Blood",         desc:"Log your very first PR",                   check:(prs,_) => Object.keys(prs).length >= 1 },
-  { id:"five_prs",    icon:"🏋️", title:"Getting Started",     desc:"Log 5 PRs",                                check:(prs,_) => Object.keys(prs).length >= 5 },
-  { id:"all_muscles", icon:"🗺️", title:"Full Body Explorer",  desc:"Log at least one PR for every muscle group",check:(prs,_) => MUSCLES.every(m => EX[m].some(e => prs[e.id])) },
-  // Strength standards
-  { id:"bench_bw",    icon:"🎯", title:"Bodyweight Bench",    desc:"Bench Press your bodyweight (1×BW est.1RM)", check:(prs,_) => { const p=prs.bench; return p && epley1RM(p.weight,p.reps) >= 80; } },
-  { id:"bench_1_25",  icon:"💥", title:"1.25× Bench",         desc:"Bench Press 1.25× bodyweight",             check:(prs,_) => { const p=prs.bench; return p && epley1RM(p.weight,p.reps) >= 100; } },
-  { id:"squat_1_5",   icon:"🦵", title:"1.5× Squat",          desc:"Back Squat 1.5× bodyweight",               check:(prs,_) => { const p=prs.squat; return p && epley1RM(p.weight,p.reps) >= 120; } },
-  { id:"squat_2x",    icon:"👑", title:"Double Squat",        desc:"Back Squat 2× bodyweight",                 check:(prs,_) => { const p=prs.squat; return p && epley1RM(p.weight,p.reps) >= 160; } },
-  { id:"dead_2x",     icon:"🔱", title:"2× Deadlift",         desc:"Deadlift 2× bodyweight",                   check:(prs,_) => { const p=prs.deadlift; return p && epley1RM(p.weight,p.reps) >= 160; } },
-  { id:"dead_2_5",    icon:"⚡", title:"2.5× Deadlift",       desc:"Deadlift 2.5× bodyweight",                 check:(prs,_) => { const p=prs.deadlift; return p && epley1RM(p.weight,p.reps) >= 200; } },
-  { id:"ohp_bw",      icon:"🏔️", title:"Overhead Master",    desc:"Overhead Press 0.75× bodyweight",          check:(prs,_) => { const p=prs.ohp; return p && epley1RM(p.weight,p.reps) >= 60; } },
-  // Bodyweight exercises
-  { id:"pullup_10",   icon:"🦅", title:"10 Pull-Ups",         desc:"Do 10 consecutive pull-ups",               check:(prs,_) => (prs.pullup?.reps||0) >= 10 },
-  { id:"pullup_20",   icon:"🦅", title:"20 Pull-Ups",         desc:"Do 20 consecutive pull-ups",               check:(prs,_) => (prs.pullup?.reps||0) >= 20 },
-  { id:"pushup_50",   icon:"💪", title:"50 Push-Ups",         desc:"Do 50 consecutive push-ups",               check:(prs,_) => (prs.pushups?.reps||0) >= 50 },
-  { id:"dip_20",      icon:"⚙️", title:"20 Dips",             desc:"Do 20 consecutive dips",                   check:(prs,_) => (prs.dips?.reps||0) >= 20 },
-  // Score milestones
-  { id:"score_50",    icon:"📈", title:"Halfway There",       desc:"Reach an overall score of 50",             check:(prs,_,overall) => overall >= 50 },
-  { id:"score_70",    icon:"🚀", title:"Advanced Lifter",     desc:"Reach an overall score of 70",             check:(prs,_,overall) => overall >= 70 },
-  { id:"score_90",    icon:"💎", title:"Near Elite",          desc:"Reach an overall score of 90",             check:(prs,_,overall) => overall >= 90 },
-  // Session milestones
-  { id:"session_10",  icon:"📅", title:"10 Sessions",         desc:"Log 10 training sessions",                 check:(_,sessions) => sessions.length >= 10 },
-  { id:"session_50",  icon:"🗓️", title:"50 Sessions",        desc:"Log 50 training sessions",                 check:(_,sessions) => sessions.length >= 50 },
-  { id:"streak_7",    icon:"🔥", title:"Week Warrior",        desc:"Train 7 days in a row",                    check:(_,sessions) => {
-    const dates = new Set(sessions.map(s => s.date));
-    let streak = 0;
-    for (let i = 0; i < 30; i++) {
-      const d = new Date(); d.setDate(d.getDate() - i);
-      if (dates.has(d.toISOString().slice(0,10))) streak++; else if (i > 0) break;
-    }
-    return streak >= 7;
+  { id:"first_pr",    icon:"🌱", title:"First Blood",         desc:"Erstes PR eingetragen",                        check:(prs)=>Object.keys(prs).length>=1 },
+  { id:"five_prs",    icon:"🏋️", title:"Startklar",           desc:"5 PRs eingetragen",                            check:(prs)=>Object.keys(prs).length>=5 },
+  { id:"all_muscles", icon:"🗺️", title:"Ganzkörper Explorer", desc:"Mindestens ein PR für jede Muskelgruppe",       check:(prs)=>MUSCLES.every(m=>EX[m].some(e=>prs[e.id])) },
+  { id:"bench_bw",    icon:"🎯", title:"Bodyweight Bench",    desc:"Bankdrücken = Körpergewicht (1RM Schätzung)",    check:(prs)=>{ const p=prs.bench; return p&&epley1RM(p.weight,p.reps)>=80; } },
+  { id:"bench_1_25",  icon:"💥", title:"1.25× Bankdrücken",   desc:"Bankdrücken 1,25× Körpergewicht",               check:(prs)=>{ const p=prs.bench; return p&&epley1RM(p.weight,p.reps)>=100; } },
+  { id:"squat_1_5",   icon:"🦵", title:"1.5× Kniebeuge",      desc:"Kniebeuge 1,5× Körpergewicht",                  check:(prs)=>{ const p=prs.squat; return p&&epley1RM(p.weight,p.reps)>=120; } },
+  { id:"squat_2x",    icon:"👑", title:"Doppelte Kniebeuge",   desc:"Kniebeuge 2× Körpergewicht",                   check:(prs)=>{ const p=prs.squat; return p&&epley1RM(p.weight,p.reps)>=160; } },
+  { id:"dead_2x",     icon:"🔱", title:"2× Kreuzheben",        desc:"Kreuzheben 2× Körpergewicht",                  check:(prs)=>{ const p=prs.deadlift; return p&&epley1RM(p.weight,p.reps)>=160; } },
+  { id:"dead_2_5",    icon:"⚡", title:"2.5× Kreuzheben",      desc:"Kreuzheben 2,5× Körpergewicht",                check:(prs)=>{ const p=prs.deadlift; return p&&epley1RM(p.weight,p.reps)>=200; } },
+  { id:"ohp_bw",      icon:"🏔️", title:"Schulter-Meister",    desc:"Schulterdrücken 0,75× Körpergewicht",           check:(prs)=>{ const p=prs.ohp; return p&&epley1RM(p.weight,p.reps)>=60; } },
+  { id:"pullup_10",   icon:"🦅", title:"10 Klimmzüge",         desc:"10 Klimmzüge hintereinander",                  check:(prs)=>(prs.pullup?.reps||0)>=10 },
+  { id:"pullup_20",   icon:"🦅", title:"20 Klimmzüge",         desc:"20 Klimmzüge hintereinander",                  check:(prs)=>(prs.pullup?.reps||0)>=20 },
+  { id:"pushup_50",   icon:"💪", title:"50 Liegestütze",        desc:"50 Liegestütze hintereinander",                check:(prs)=>(prs.pushups?.reps||0)>=50 },
+  { id:"dip_20",      icon:"⚙️", title:"20 Dips",              desc:"20 Dips hintereinander",                       check:(prs)=>(prs.dips?.reps||0)>=20 },
+  { id:"score_50",    icon:"📈", title:"Halbzeit",             desc:"Gesamtscore von 50 erreicht",                   check:(prs,_,overall)=>overall>=50 },
+  { id:"score_70",    icon:"🚀", title:"Fortgeschrittener",    desc:"Gesamtscore von 70 erreicht",                   check:(prs,_,overall)=>overall>=70 },
+  { id:"score_90",    icon:"💎", title:"Fast Elite",           desc:"Gesamtscore von 90 erreicht",                   check:(prs,_,overall)=>overall>=90 },
+  { id:"session_10",  icon:"📅", title:"10 Einheiten",         desc:"10 Trainingseinheiten eingetragen",             check:(_,sessions)=>sessions.length>=10 },
+  { id:"session_50",  icon:"🗓️", title:"50 Einheiten",        desc:"50 Trainingseinheiten eingetragen",             check:(_,sessions)=>sessions.length>=50 },
+  { id:"streak_7",    icon:"🔥", title:"Woche Warrior",        desc:"7 Tage am Stück trainiert",                    check:(_,sessions)=>{
+    const dates=new Set(sessions.map(s=>s.date)); let streak=0;
+    for(let i=0;i<30;i++){const d=new Date();d.setDate(d.getDate()-i);if(dates.has(d.toISOString().slice(0,10)))streak++;else if(i>0)break;}
+    return streak>=7;
   }},
-  { id:"vol_10k",     icon:"🏗️", title:"10,000 kg Volume",   desc:"Lift 10,000 kg total in a single session", check:(_,sessions) => sessions.some(s => s.totalVol >= 10000) },
+  { id:"vol_10k",     icon:"🏗️", title:"10.000 kg Volumen",   desc:"10.000 kg in einer Session",                   check:(_,sessions)=>sessions.some(s=>s.totalVol>=10000) },
+  { id:"custom_ex",   icon:"🔧", title:"Kreativtrainer",       desc:"Eine eigene Übung hinzugefügt",                 check:(prs,_,__,customExercises)=>(customExercises||[]).length>0 },
+  { id:"goal_set",    icon:"🎯", title:"Zielsicher",           desc:"Ein Traumziel gesetzt",                         check:(prs,_,__,___,goals)=>(goals||[]).length>0 },
 ];
 
 /* ═══════════════════════════════════════════════════════════  FUN FACTS  */
 const FUN_FACTS = [
-  { icon:"🧠", text:"The average gym-goer in Europe bench presses ~70 kg. You're competing with millions." },
-  { icon:"🦴", text:"Bone density improves with heavy lifting — strength training is literally making your skeleton harder." },
-  { icon:"⚡", text:"A single rep of a heavy deadlift activates over 600 muscles simultaneously." },
-  { icon:"🔬", text:"Muscle hypertrophy (growth) peaks 24–48 h after training — recovery IS training." },
-  { icon:"🏆", text:"The world record bench press is 355 kg (raw). The world record deadlift is 501 kg." },
-  { icon:"🧪", text:"Progressive overload — not supplements — is responsible for ~90% of strength gains." },
-  { icon:"😴", text:"You release the most testosterone and growth hormone in the first 2 hours of deep sleep." },
-  { icon:"🔥", text:"After a heavy leg session, your metabolism stays elevated for up to 48 hours." },
-  { icon:"💡", text:"The 1RM Epley formula (used here) is accurate to within 5% for most lifters." },
-  { icon:"🌍", text:"strengthlevel.de bases its standards on millions of real training logs from across the world." },
-  { icon:"⏱️", text:"Rest 3–5 minutes between heavy compound sets for maximal strength gains." },
-  { icon:"🥩", text:"Eating 1.6 g protein per kg bodyweight is as effective as 3.2 g/kg for muscle growth." },
-  { icon:"📊", text:"The Intermediate rank (~40%) means you lift more than ~60% of all gym-goers. That's already impressive." },
-  { icon:"🎯", text:"Consistency over intensity — 3 mediocre sessions beat 1 perfect session every week." },
+  { icon:"🧠", text:"Der durchschnittliche Europäer im Gym drückt ca. 70 kg auf der Bank. Du konkurrierst mit Millionen." },
+  { icon:"🦴", text:"Schweres Training verbessert die Knochendichte – Krafttraining macht buchstäblich dein Skelett härter." },
+  { icon:"⚡", text:"Eine schwere Kreuzhebensatz aktiviert über 600 Muskeln gleichzeitig." },
+  { icon:"🔬", text:"Muskelwachstum (Hypertrophie) erreicht seinen Höhepunkt 24–48 Stunden nach dem Training – Erholung IS Training." },
+  { icon:"🏆", text:"Weltrekord Bankdrücken: 355 kg (raw). Weltrekord Kreuzheben: 501 kg." },
+  { icon:"🧪", text:"Progressive Überladung – nicht Supplemente – ist für ~90% der Kraftzuwächse verantwortlich." },
+  { icon:"😴", text:"Du schüttest am meisten Testosteron und Wachstumshormon in den ersten 2 Stunden Tiefschlaf aus." },
+  { icon:"🔥", text:"Nach einer schweren Beineinheit bleibt dein Stoffwechsel bis zu 48 Stunden erhöht." },
+  { icon:"💡", text:"Die 1RM Epley-Formel (hier verwendet) ist für die meisten Lifter auf 5% genau." },
+  { icon:"⏱️", text:"Pause 3–5 Minuten zwischen schweren Grundübungen für maximale Kraftzuwächse." },
+  { icon:"🥩", text:"1,6 g Protein pro kg Körpergewicht ist genauso effektiv wie 3,2 g/kg für Muskelwachstum." },
+  { icon:"📊", text:"Der Intermediate-Rang (~40%) bedeutet du hebst mehr als ~60% aller Gym-Besucher. Das ist schon beeindruckend." },
+  { icon:"🎯", text:"Konsistenz über Intensität – 3 mittelmäßige Einheiten schlagen 1 perfekte Einheit jede Woche." },
 ];
 
 /* ═══════════════════════════════════════════════════════════  HELPERS  */
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const fmtDate  = iso => { if (!iso) return ""; const d = new Date(iso+"T00:00:00"); return d.toLocaleDateString("en-US", {month:"short",day:"numeric",year:"numeric"}); };
-const fmtShort = iso => { if (!iso) return ""; const d = new Date(iso+"T00:00:00"); return d.toLocaleDateString("en-US", {month:"short",day:"numeric"}); };
-const weekChar = iso  => { const d = new Date(iso+"T00:00:00"); return ["Su","Mo","Tu","We","Th","Fr","Sa"][d.getDay()]; };
+const todayISO = () => new Date().toISOString().slice(0,10);
+const fmtDate  = iso => { if(!iso)return""; const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("de-AT",{month:"short",day:"numeric",year:"numeric"}); };
+const fmtShort = iso => { if(!iso)return""; const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("de-AT",{month:"short",day:"numeric"}); };
+const weekChar = iso  => { const d=new Date(iso+"T00:00:00"); return ["So","Mo","Di","Mi","Do","Fr","Sa"][d.getDay()]; };
 
 /* ═══════════════════════════════════════════════════════════  CSS  */
 const CSS = `
@@ -222,14 +242,18 @@ const CSS = `
 :root{
   --bg:#07090e;--bg2:#0c1018;--surf:#111820;--surf2:#16202e;
   --bdr:#1c2838;--bdr2:#253346;--text:#c8d6e5;--text2:#8fa3b8;--muted:#4a5e72;
-  --acc:#38bdf8;--red:#f43f5e;--grn:#34d399;--gld:#fbbf24;
+  --acc:#38bdf8;--red:#f43f5e;--grn:#34d399;--gld:#fbbf24;--purp:#a855f7;
   --head:'Barlow Condensed',sans-serif;--body:'DM Sans',sans-serif;
+  --safe-top: env(safe-area-inset-top, 0px);
 }
-html,body{background:var(--bg)}
+html,body{background:var(--bg);-webkit-text-size-adjust:100%}
 .app{min-height:100vh;max-width:500px;margin:0 auto;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.5}
 
-/* header */
-.hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;background:var(--bg2);border-bottom:1px solid var(--bdr)}
+/* header – pushed down below camera island */
+.hdr{display:flex;align-items:center;justify-content:space-between;
+  padding-top:calc(var(--safe-top) + 52px);
+  padding-bottom:12px;padding-left:20px;padding-right:20px;
+  background:var(--bg2);border-bottom:1px solid var(--bdr)}
 .logo{font-family:var(--head);font-size:26px;font-weight:800;letter-spacing:1px;color:#fff;line-height:1}
 .logo em{color:var(--acc);font-style:normal}
 .logo-sub{font-family:var(--head);font-size:11px;font-weight:500;letter-spacing:2.5px;color:var(--muted);text-transform:uppercase;margin-top:1px}
@@ -239,11 +263,11 @@ html,body{background:var(--bg)}
 /* nav */
 .nav{display:flex;background:var(--bg2);border-bottom:1px solid var(--bdr);overflow-x:auto;scrollbar-width:none}
 .nav::-webkit-scrollbar{display:none}
-.nav-btn{flex:1;min-width:68px;padding:11px 4px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--head);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;white-space:nowrap;transition:color .18s,border-color .18s}
+.nav-btn{flex:1;min-width:62px;padding:11px 4px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;white-space:nowrap;transition:color .18s,border-color .18s}
 .nav-btn.active{color:var(--acc);border-bottom-color:var(--acc);background:rgba(56,189,248,.04)}
 
 /* scroll */
-.scroll{padding:18px 16px 80px;overflow-y:auto;max-height:calc(100vh - 110px)}
+.scroll{padding:18px 16px 100px;overflow-y:auto;max-height:calc(100vh - var(--safe-top) - 162px)}
 
 /* type */
 .h1{font-family:var(--head);font-size:26px;font-weight:800;color:#fff}
@@ -268,7 +292,7 @@ html,body{background:var(--bg)}
 .bar-t{height:5px;background:var(--bdr);border-radius:3px;overflow:hidden}
 .bar-f{height:100%;border-radius:3px;transition:width .6s cubic-bezier(.23,1,.32,1)}
 
-/* stats */
+/* stats boxes */
 .sg2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
 .sg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
 .sbox{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;padding:14px 12px;text-align:center}
@@ -278,7 +302,7 @@ html,body{background:var(--bg)}
 
 /* form */
 .flbl{display:block;font-family:var(--head);font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;margin-bottom:5px}
-.finp,.fsel{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--bdr2);border-radius:8px;color:var(--text);font-family:var(--body);font-size:15px;outline:none;transition:border-color .18s;-webkit-appearance:none}
+.finp,.fsel{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--bdr2);border-radius:8px;color:var(--text);font-family:var(--body);font-size:16px;outline:none;transition:border-color .18s;-webkit-appearance:none}
 .finp:focus,.fsel:focus{border-color:var(--acc)}
 .finp::placeholder{color:var(--muted)}
 .fg{margin-bottom:12px}
@@ -291,8 +315,10 @@ html,body{background:var(--bg)}
 .btn:active{transform:scale(.99)}
 .btn-g{padding:9px 16px;background:var(--surf2);border:1px solid var(--bdr2);border-radius:8px;color:var(--text);font-family:var(--body);font-size:14px;cursor:pointer;transition:border-color .18s}
 .btn-g:hover{border-color:var(--acc);color:var(--acc)}
-.btn-i{padding:7px 12px;background:var(--surf2);border:1px solid var(--bdr);border-radius:6px;color:var(--muted);font-size:13px;cursor:pointer;transition:all .15s}
-.btn-i:hover{color:var(--text)}
+.btn-i{padding:7px 12px;background:var(--surf2);border:1px solid var(--bdr2);border-radius:6px;color:var(--text2);font-size:13px;cursor:pointer;transition:all .15s}
+.btn-i:hover{color:var(--text);border-color:var(--acc)}
+.btn-add{padding:8px 16px;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.4);border-radius:6px;color:var(--acc);font-family:var(--head);font-size:13px;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .15s}
+.btn-add:hover{background:rgba(56,189,248,.2)}
 .btn-d{padding:6px 12px;background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.3);border-radius:6px;color:var(--red);font-family:var(--head);font-size:12px;font-weight:700;cursor:pointer;transition:background .18s}
 .btn-d:hover{background:rgba(244,63,94,.2)}
 
@@ -301,6 +327,11 @@ html,body{background:var(--bg)}
 .fbar::-webkit-scrollbar{display:none}
 .fpill{padding:5px 13px;border-radius:20px;border:1px solid var(--bdr2);background:none;color:var(--muted);font-family:var(--head);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s}
 .fpill.active{border-color:var(--acc);color:var(--acc);background:rgba(56,189,248,.08)}
+
+/* search */
+.search-wrap{position:relative;margin-bottom:14px}
+.search-wrap input{padding-left:36px!important}
+.search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:16px;pointer-events:none}
 
 /* rank hero */
 .rhero{border-radius:12px;padding:22px 20px 18px;margin-bottom:14px;text-align:center;position:relative;overflow:hidden}
@@ -317,9 +348,6 @@ html,body{background:var(--bg)}
 .vb{width:100%;border-radius:3px 3px 0 0;min-height:2px;transition:height .5s ease}
 .vl{font-size:9px;color:var(--muted);letter-spacing:.5px}
 
-/* line chart */
-.lchart{position:relative;height:100px;width:100%;margin-top:8px}
-
 /* session */
 .sess{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;margin-bottom:10px;overflow:hidden}
 .sess-h{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;transition:background .15s}
@@ -335,6 +363,10 @@ html,body{background:var(--bg)}
 /* hint */
 .hint{font-size:13px;color:var(--text2);background:var(--surf2);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px;margin-top:6px;line-height:1.5}
 .hint strong{color:var(--acc)}
+
+/* improvement banner */
+.impr-banner{display:flex;align-items:center;gap:8px;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:var(--grn)}
+.impr-banner.none{background:rgba(74,94,114,.08);border-color:rgba(74,94,114,.25);color:var(--muted)}
 
 /* achievement */
 .ach{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;transition:border-color .2s}
@@ -361,7 +393,7 @@ html,body{background:var(--bg)}
 /* top% pill */
 .top-pct{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-family:var(--head);font-size:13px;font-weight:700;letter-spacing:1px}
 
-/* progress sparkline */
+/* sparkline */
 .sparkline{display:flex;align-items:flex-end;gap:3px;height:40px;margin-top:6px}
 .spark-bar{flex:1;border-radius:2px 2px 0 0;min-height:2px;transition:height .4s ease}
 
@@ -375,6 +407,25 @@ html,body{background:var(--bg)}
 .balance-track{flex:1;height:8px;background:var(--bdr);border-radius:4px;overflow:hidden}
 .balance-fill{height:100%;border-radius:4px;transition:width .6s cubic-bezier(.23,1,.32,1)}
 
+/* goal card */
+.goal-card{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;padding:14px 16px;margin-bottom:10px}
+.goal-progress{height:6px;background:var(--bdr);border-radius:3px;overflow:hidden;margin:8px 0}
+.goal-fill{height:100%;border-radius:3px;transition:width .6s ease}
+.tip-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:12px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2);color:var(--acc);margin-top:6px}
+
+/* weight chart dots */
+.w-chart{position:relative;height:80px;margin:8px 0}
+.w-line{position:absolute;bottom:0;left:0;right:0;height:100%}
+
+/* dev warning banner */
+.dev-warn{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--gld);line-height:1.5}
+
+/* session summary overlay */
+.summary-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.8);backdrop-filter:blur(6px);display:flex;align-items:flex-end;justify-content:center;padding:16px}
+.summary-sheet{background:var(--surf);border:1px solid var(--bdr);border-radius:20px 20px 12px 12px;padding:24px 20px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto}
+.summary-stat{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--bdr)}
+.summary-stat:last-child{border-bottom:none}
+
 /* anim */
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .fi{animation:fadeUp .22s ease}
@@ -386,74 +437,110 @@ html,body{background:var(--bg)}
 
 /* ═══════════════════════════════════════════════════════════  MINI COMPONENTS  */
 function Badge({ score }) {
-  const r = getRank(score);
-  return <span className="badge" style={{ color:r.color, borderColor:r.color+"44", background:r.bg }}>{r.name}</span>;
+  const r=getRank(score);
+  return <span className="badge" style={{color:r.color,borderColor:r.color+"44",background:r.bg}}>{r.name}</span>;
 }
 function Bar({ pct, color }) {
-  return <div className="bar-t"><div className="bar-f" style={{ width:`${Math.min(100,pct)}%`, background:color, boxShadow:`0 0 6px ${color}55` }} /></div>;
+  return <div className="bar-t"><div className="bar-f" style={{width:`${Math.min(100,pct)}%`,background:color,boxShadow:`0 0 6px ${color}55`}} /></div>;
 }
 function Lbl({ children }) {
   return <div className="lbl">{children}</div>;
 }
 
+/* ═══════════════════════════════════════════════════════════  DEV WARNING  */
+function DevWarning() {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem("ir_devwarn_dismissed") === "1"; } catch { return false; }
+  });
+  if (dismissed) return null;
+  return (
+    <div className="dev-warn">
+      <span style={{fontSize:20,flexShrink:0}}>⚠️</span>
+      <div style={{flex:1}}>
+        <strong style={{display:"block",marginBottom:4}}>App in Entwicklung</strong>
+        Einige Funktionen könnten nicht wie erwartet funktionieren. Daten werden lokal gespeichert – ein Browser-Reset löscht sie. Regelmäßige Backups empfohlen.
+        <button onClick={()=>{setDismissed(true);try{localStorage.setItem("ir_devwarn_dismissed","1")}catch{}}} style={{display:"block",marginTop:8,padding:"4px 12px",background:"rgba(251,191,36,.15)",border:"1px solid rgba(251,191,36,.35)",borderRadius:6,color:"var(--gld)",fontSize:12,cursor:"pointer",fontFamily:"var(--head)",fontWeight:700}}>Verstanden</button>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════  DASHBOARD  */
-function DashboardTab({ prs, sessions, onNavigate }) {
+function DashboardTab({ prs, sessions, onNavigate, userProfile }) {
   const muscleScores = useMemo(() =>
-    MUSCLES.map(m => ({ muscle:m, score: getMuscleScore(m, prs) })),
+    MUSCLES.map(m => ({ muscle:m, score:getMuscleScore(m,prs) })),
   [prs]);
 
   const overall = useMemo(() => {
-    const f = muscleScores.filter(m => m.score > 0);
-    return f.length ? Math.round(f.reduce((s,m) => s+m.score, 0) / f.length) : 0;
+    const f=muscleScores.filter(m=>m.score>0);
+    return f.length ? Math.round(f.reduce((s,m)=>s+m.score,0)/f.length) : 0;
   }, [muscleScores]);
 
-  const rank = getRank(overall);
-  const next = getNextRank(overall);
-  const topPct = scoreToTopPct(overall);
+  const rank=getRank(overall), next=getNextRank(overall), topPct=scoreToTopPct(overall);
 
   const last7 = useMemo(() => {
-    const dates = new Set(sessions.map(s => s.date));
-    return Array.from({length:7}, (_,i) => {
-      const d = new Date(); d.setDate(d.getDate() - (6-i));
-      const iso = d.toISOString().slice(0,10);
-      return { iso, label:weekChar(iso), trained:dates.has(iso) };
+    const dates=new Set(sessions.map(s=>s.date));
+    return Array.from({length:7},(_,i)=>{
+      const d=new Date(); d.setDate(d.getDate()-(6-i));
+      const iso=d.toISOString().slice(0,10);
+      return {iso,label:weekChar(iso),trained:dates.has(iso)};
     });
   }, [sessions]);
 
-  const fact = useMemo(() => FUN_FACTS[new Date().getDate() % FUN_FACTS.length], []);
+  const fact=useMemo(()=>FUN_FACTS[new Date().getDate()%FUN_FACTS.length],[]);
+  const strongest=[...muscleScores].filter(m=>m.score>0).sort((a,b)=>b.score-a.score)[0];
+  const weakest  =[...muscleScores].filter(m=>m.score>0).sort((a,b)=>a.score-b.score)[0];
+  const ICONS={Chest:"◈",Back:"◉",Legs:"◆",Shoulders:"◇",Arms:"◈",Core:"◎",Cardio:"⬡"};
 
-  const strongest = [...muscleScores].filter(m=>m.score>0).sort((a,b)=>b.score-a.score)[0];
-  const weakest   = [...muscleScores].filter(m=>m.score>0).sort((a,b)=>a.score-b.score)[0];
-
-  const ICONS = { Chest:"◈", Back:"◉", Legs:"◆", Shoulders:"◇", Arms:"◈", Core:"◎" };
+  // Last session calories
+  const lastSession = sessions[0];
+  const lastCals = lastSession ? estimateCalories(lastSession, userProfile?.weight||80) : null;
 
   return (
     <div className="scroll fi">
+      <DevWarning />
+
       {/* Rank Hero */}
-      <div className="rhero" style={{ background:`linear-gradient(135deg, ${rank.bg} 0%, rgba(0,0,0,0.2) 100%)`, border:`1px solid ${rank.color}30` }}>
-        <span className="rnum" style={{ color:rank.color, textShadow:`0 0 40px ${rank.color}55` }}>{overall}</span>
-        <div className="rname" style={{ color:rank.color }}>{rank.name}</div>
-        {overall > 0 && (
-          <div style={{ display:"flex", justifyContent:"center", marginBottom:12 }}>
-            <div className="top-pct" style={{ background:`rgba(${rank.color.slice(1).match(/.{2}/g).map(h=>parseInt(h,16)).join(",")},0.12)`, border:`1px solid ${rank.color}44`, color:rank.color }}>
-              Top {topPct}% worldwide
+      <div className="rhero" style={{background:`linear-gradient(135deg,${rank.bg} 0%,rgba(0,0,0,0.2) 100%)`,border:`1px solid ${rank.color}30`}}>
+        <span className="rnum" style={{color:rank.color,textShadow:`0 0 40px ${rank.color}55`}}>{overall}</span>
+        <div className="rname" style={{color:rank.color}}>{rank.name}</div>
+        {overall>0&&(
+          <div style={{display:"flex",justifyContent:"center",marginBottom:12}}>
+            <div className="top-pct" style={{background:`${rank.color}18`,border:`1px solid ${rank.color}44`,color:rank.color}}>
+              Top {topPct}% weltweit
             </div>
           </div>
         )}
-        {next ? (
+        {next?(
           <>
-            <Bar pct={overall===0 ? 0 : ((overall-rank.pct)/(next.pct-rank.pct))*100} color={rank.color} />
-            <div style={{ fontSize:12, color:"var(--muted)", marginTop:8 }}>
-              {next.pct - overall} pts to <strong style={{ color:next.color }}>{next.name}</strong>
+            <Bar pct={overall===0?0:((overall-rank.pct)/(next.pct-rank.pct))*100} color={rank.color} />
+            <div style={{fontSize:12,color:"var(--muted)",marginTop:8}}>
+              {next.pct-overall} Pkt bis <strong style={{color:next.color}}>{next.name}</strong>
             </div>
           </>
-        ) : (
-          <div style={{ fontSize:13, color:rank.color }}>Maximum rank achieved 🏆</div>
+        ):(
+          <div style={{fontSize:13,color:rank.color}}>Maximaler Rang erreicht 🏆</div>
         )}
-        <div style={{ fontSize:12, color:"var(--muted)", marginTop:6 }}>
-          Based on {Object.keys(prs).length} PRs logged
+        <div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>
+          Basierend auf {Object.keys(prs).length} PRs · {sessions.length} Einheiten
         </div>
       </div>
+
+      {/* Quick stats row */}
+      {lastCals && (
+        <div className="sg2" style={{marginBottom:10}}>
+          <div className="sbox" style={{borderColor:"rgba(244,63,94,.2)"}}>
+            <div style={{fontSize:20,marginBottom:4}}>🔥</div>
+            <div className="sval" style={{fontSize:22}}>{lastCals}<span className="sunit">kcal</span></div>
+            <div className="slbl">Letzte Einheit (ca.)</div>
+          </div>
+          <div className="sbox" style={{borderColor:"rgba(52,211,153,.2)"}}>
+            <div style={{fontSize:20,marginBottom:4}}>📅</div>
+            <div className="sval" style={{fontSize:22}}>{last7.filter(d=>d.trained).length}<span className="sunit">/7</span></div>
+            <div className="slbl">Tage diese Woche</div>
+          </div>
+        </div>
+      )}
 
       {/* Fun Fact */}
       <div className="fact">
@@ -462,46 +549,45 @@ function DashboardTab({ prs, sessions, onNavigate }) {
       </div>
 
       {/* Week */}
-      <Lbl>This Week</Lbl>
+      <Lbl>Diese Woche</Lbl>
       <div className="card">
         <div className="wdots">
-          {last7.map(d => (
+          {last7.map(d=>(
             <div key={d.iso} className="wdot">
               <div className={`wdot-c ${d.trained?"tr":""}`}>{d.trained?"✓":""}</div>
               <div className={`wdot-l ${d.trained?"tr":""}`}>{d.label}</div>
             </div>
           ))}
         </div>
-        <div style={{ fontSize:13, color:"var(--text2)", textAlign:"center" }}>
-          {last7.filter(d=>d.trained).length} of 7 days trained this week
+        <div style={{fontSize:13,color:"var(--text2)",textAlign:"center"}}>
+          {last7.filter(d=>d.trained).length} von 7 Tagen trainiert
         </div>
       </div>
 
       {/* Muscle Scores */}
-      <Lbl>Muscle Groups</Lbl>
-      {muscleScores.map(({ muscle, score }) => {
-        const r = getRank(score);
-        const tp = scoreToTopPct(score);
+      <Lbl>Muskelgruppen</Lbl>
+      {muscleScores.map(({muscle,score})=>{
+        const r=getRank(score),tp=scoreToTopPct(score);
         return (
-          <div key={muscle} className="card" style={{ padding:"14px 16px", borderColor:score>0 ? r.color+"25":"var(--bdr)" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                <span style={{ fontSize:20, color:r.color }}>{ICONS[muscle]}</span>
+          <div key={muscle} className="card" style={{padding:"14px 16px",borderColor:score>0?r.color+"25":"var(--bdr)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:20,color:r.color}}>{ICONS[muscle]||"◎"}</span>
                 <div>
                   <div className="h3">{muscle}</div>
-                  {score > 0 ? (
-                    <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:2 }}>
+                  {score>0?(
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginTop:2}}>
                       <Badge score={score} />
-                      <span style={{ fontSize:11, color:"var(--muted)" }}>Top {tp}%</span>
+                      <span style={{fontSize:11,color:"var(--muted)"}}>Top {tp}%</span>
                     </div>
-                  ) : (
-                    <span style={{ fontSize:12, color:"var(--muted)" }}>No PRs yet</span>
+                  ):(
+                    <span style={{fontSize:12,color:"var(--muted)"}}>Noch keine PRs</span>
                   )}
                 </div>
               </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"var(--head)", fontSize:30, fontWeight:800, color:score>0?r.color:"var(--muted)", lineHeight:1 }}>{score}</div>
-                <div style={{ fontSize:11, color:"var(--muted)" }}>/ 100</div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontFamily:"var(--head)",fontSize:30,fontWeight:800,color:score>0?r.color:"var(--muted)",lineHeight:1}}>{score}</div>
+                <div style={{fontSize:11,color:"var(--muted)"}}>/ 100</div>
               </div>
             </div>
             <Bar pct={score} color={score>0?r.color:"var(--muted)"} />
@@ -510,35 +596,35 @@ function DashboardTab({ prs, sessions, onNavigate }) {
       })}
 
       {/* Insights */}
-      {overall > 0 && (
+      {overall>0&&(
         <>
-          <Lbl>Quick Insights</Lbl>
+          <Lbl>Einblicke</Lbl>
           <div className="sg2">
-            {strongest && (
-              <div className="sbox" style={{ borderColor:"rgba(52,211,153,.22)" }}>
-                <div style={{ fontSize:22, marginBottom:4 }}>💪</div>
-                <div className="slbl">Strongest</div>
-                <div style={{ fontFamily:"var(--head)", fontSize:18, fontWeight:700, color:"var(--grn)", marginTop:4 }}>{strongest.muscle}</div>
-                <div style={{ fontSize:12, color:"var(--muted)" }}>Score {strongest.score}</div>
+            {strongest&&(
+              <div className="sbox" style={{borderColor:"rgba(52,211,153,.22)"}}>
+                <div style={{fontSize:22,marginBottom:4}}>💪</div>
+                <div className="slbl">Stärkste Gruppe</div>
+                <div style={{fontFamily:"var(--head)",fontSize:18,fontWeight:700,color:"var(--grn)",marginTop:4}}>{strongest.muscle}</div>
+                <div style={{fontSize:12,color:"var(--muted)"}}>Score {strongest.score}</div>
               </div>
             )}
-            {weakest && (
-              <div className="sbox" style={{ borderColor:"rgba(244,63,94,.22)" }}>
-                <div style={{ fontSize:22, marginBottom:4 }}>🎯</div>
-                <div className="slbl">Focus Area</div>
-                <div style={{ fontFamily:"var(--head)", fontSize:18, fontWeight:700, color:"var(--red)", marginTop:4 }}>{weakest.muscle}</div>
-                <div style={{ fontSize:12, color:"var(--muted)" }}>Score {weakest.score}</div>
+            {weakest&&(
+              <div className="sbox" style={{borderColor:"rgba(244,63,94,.22)"}}>
+                <div style={{fontSize:22,marginBottom:4}}>🎯</div>
+                <div className="slbl">Fokusbereich</div>
+                <div style={{fontFamily:"var(--head)",fontSize:18,fontWeight:700,color:"var(--red)",marginTop:4}}>{weakest.muscle}</div>
+                <div style={{fontSize:12,color:"var(--muted)"}}>Score {weakest.score}</div>
               </div>
             )}
           </div>
         </>
       )}
 
-      {overall === 0 && (
-        <div style={{ marginTop:10, background:"rgba(56,189,248,.05)", border:"1px solid rgba(56,189,248,.15)", borderRadius:10, padding:"24px 20px", textAlign:"center" }}>
-          <div style={{ fontSize:36, marginBottom:10 }}>🏋️</div>
-          <div className="h2" style={{ marginBottom:6 }}>Set Your First PR</div>
-          <div style={{ fontSize:14, color:"var(--text2)" }}>Head to the <strong style={{ color:"var(--acc)" }}>PRs</strong> tab and log your best lifts to unlock your strength rank.</div>
+      {overall===0&&(
+        <div style={{marginTop:10,background:"rgba(56,189,248,.05)",border:"1px solid rgba(56,189,248,.15)",borderRadius:10,padding:"24px 20px",textAlign:"center"}}>
+          <div style={{fontSize:36,marginBottom:10}}>🏋️</div>
+          <div className="h2" style={{marginBottom:6}}>Erstes PR eintragen</div>
+          <div style={{fontSize:14,color:"var(--text2)"}}>Geh zum <strong style={{color:"var(--acc)"}}>PRs</strong>-Tab und trage deine besten Lifts ein, um deinen Stärke-Rang freizuschalten.</div>
         </div>
       )}
     </div>
@@ -546,136 +632,245 @@ function DashboardTab({ prs, sessions, onNavigate }) {
 }
 
 /* ═══════════════════════════════════════════════════════════  PRs TAB  */
-function PRsTab({ prs, setPrs, prHistory }) {
+function PRsTab({ prs, setPrs, prHistory, customExercises }) {
   const [filter,  setFilter]  = useState("All");
+  const [search,  setSearch]  = useState("");
   const [editing, setEditing] = useState(null);
   const [weight,  setWeight]  = useState("");
   const [reps,    setReps]    = useState("");
   const [flashId, setFlashId] = useState(null);
+  const [showSettings, setShowSettings] = useState(null); // exId
+  const [unilateralIds, setUnilateralIds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("ir_unilateral")||"[]"); } catch { return []; }
+  });
 
-  const filtered = filter === "All" ? ALL_EX : ALL_EX.filter(e => e.muscle === filter);
+  const toggleUnilateral = (id) => {
+    const next = unilateralIds.includes(id) ? unilateralIds.filter(x=>x!==id) : [...unilateralIds,id];
+    setUnilateralIds(next);
+    try { localStorage.setItem("ir_unilateral", JSON.stringify(next)); } catch {}
+  };
+
+  const allExercises = useMemo(() => [
+    ...ALL_EX,
+    ...(customExercises||[]).map(ce => ({ ...ce, muscle: ce.muscle||"Custom", isCustom:true })),
+  ], [customExercises]);
+
+  const filtered = useMemo(() => {
+    let list = filter==="All" ? allExercises : allExercises.filter(e=>e.muscle===filter||e.muscle==="Custom"&&filter==="Custom");
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(e => e.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [filter, search, allExercises]);
+
+  const filterGroups = ["All",...MUSCLES,"Custom"];
 
   const startEdit = ex => {
-    const pr = prs[ex.id];
+    const pr=prs[ex.id];
     setEditing(ex.id);
-    setWeight(pr && !ex.isReps ? String(pr.weight) : "");
-    setReps(pr ? String(pr.reps) : "");
+    setWeight(pr&&!ex.isReps?String(pr.weight):"");
+    setReps(pr?String(pr.reps):"");
+    setShowSettings(null);
   };
 
   const save = ex => {
     if (!reps) return;
-    const w = ex.isReps ? 0 : Number(weight);
-    const r = Number(reps);
-    if (!ex.isReps && !w) return;
-    const newS = ex.isReps ? calcRepsScore(r, ex.s) : calcScore(w, r, ex.s);
-    const old  = prs[ex.id];
-    const oldS = old ? getExScore(ex, old) : -1;
-    setPrs(p => ({ ...p, [ex.id]: { weight:w, reps:r, date:todayISO() } }));
-    setEditing(null); setWeight(""); setReps("");
-    if (newS > oldS) { setFlashId(ex.id); setTimeout(() => setFlashId(null), 600); }
+    const w=ex.isReps?0:Number(weight);
+    const r=Number(reps);
+    if (!ex.isReps&&!w) return;
+    const newS=ex.isReps?calcRepsScore(r,ex.s):calcScore(w,r,ex.s);
+    const old=prs[ex.id];
+    const oldS=old?getExScore(ex,old):-1;
+    setPrs(p=>({...p,[ex.id]:{weight:w,reps:r,date:todayISO()}}));
+    setEditing(null);setWeight("");setReps("");
+    if (newS>oldS){setFlashId(ex.id);setTimeout(()=>setFlashId(null),600);}
+  };
+
+  const deletePR = id => { setPrs(p=>{const n={...p};delete n[id];return n;}); };
+
+  const getLastSessionEntry = (exId) => {
+    // Returns last training session where this exercise appeared (not just PR)
+    return null; // would need session data – placeholder
   };
 
   return (
     <div className="scroll fi">
-      <div className="card" style={{ marginBottom:14, background:"linear-gradient(135deg,rgba(56,189,248,.07),rgba(0,0,0,0))" }}>
-        <div className="h2" style={{ marginBottom:4 }}>Personal Records</div>
-        <div style={{ fontSize:14, color:"var(--text2)" }}>
-          Standards from <strong style={{ color:"var(--acc)" }}>strengthlevel.de</strong> — millions of real lifters.
+      <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,rgba(56,189,248,.07),rgba(0,0,0,0))"}}>
+        <div className="h2" style={{marginBottom:4}}>Persönliche Rekorde</div>
+        <div style={{fontSize:14,color:"var(--text2)"}}>
+          Standards von <strong style={{color:"var(--acc)"}}>strengthlevel.de</strong> – Millionen echter Lifter.
         </div>
       </div>
 
+      {/* Search */}
+      <div className="search-wrap">
+        <span className="search-icon">🔍</span>
+        <input className="finp" type="text" placeholder="Übung suchen…" value={search} onChange={e=>setSearch(e.target.value)} style={{paddingLeft:36}} />
+      </div>
+
       <div className="fbar">
-        {["All",...MUSCLES].map(m => (
-          <button key={m} className={`fpill ${filter===m?"active":""}`} onClick={() => setFilter(m)}>{m}</button>
+        {filterGroups.map(m=>(
+          <button key={m} className={`fpill ${filter===m?"active":""}`} onClick={()=>setFilter(m)}>{m}</button>
         ))}
       </div>
 
-      {filtered.map(ex => {
-        const pr    = prs[ex.id];
-        const score = pr ? getExScore(ex, pr) : 0;
-        const rank  = getRank(score);
-        const isOpen  = editing === ex.id;
-        const isFlash = flashId === ex.id;
-        const hist    = (prHistory[ex.id] || []).slice(-5);
+      {filtered.length===0&&(
+        <div className="empty"><span className="empty-i">🔍</span>Keine Übungen gefunden.</div>
+      )}
 
-        const preview = isOpen
-          ? (ex.isReps
-              ? calcRepsScore(Number(reps)||0, ex.s)
-              : (weight && reps ? calcScore(Number(weight), Number(reps), ex.s) : null))
-          : null;
+      {filtered.map(ex=>{
+        const pr=prs[ex.id];
+        const score=pr&&!ex.isCustom?getExScore(ex,pr):0;
+        const rank=getRank(score);
+        const isOpen=editing===ex.id;
+        const isFlash=flashId===ex.id;
+        const hist=(prHistory[ex.id]||[]).slice(-5);
+        const isUni=unilateralIds.includes(ex.id);
+        const showSet=showSettings===ex.id;
 
-        const improvement = pr && hist.length >= 2
-          ? (() => {
-              const first = hist[0];
-              const firstS = getExScore(ex, first);
-              const diff   = score - firstS;
-              return diff > 0 ? `+${Math.round(diff)} pts since first log` : null;
+        const preview=isOpen
+          ?(ex.isReps?calcRepsScore(Number(reps)||0,ex.s)
+            :(weight&&reps?calcScore(Number(weight),Number(reps),ex.s):null))
+          :null;
+
+        // Improvement since first recorded
+        const improvement=pr&&hist.length>=2
+          ?(()=>{
+              const first=hist[0];
+              const firstS=getExScore(ex,first);
+              const diff=score-firstS;
+              return diff>0?`+${Math.round(diff)} Pkt seit erstem Log`:null;
             })()
-          : null;
+          :null;
+
+        // Previous PR for comparison
+        const prevPR=hist.length>=2?hist[hist.length-2]:null;
 
         return (
           <div key={ex.id} className={`clist ${isFlash?"pop":""}`}
-            style={{ borderColor:pr ? rank.color+"28":"var(--bdr)", marginBottom:8 }}>
-            <div className="row" style={{ cursor:"pointer" }} onClick={() => isOpen ? setEditing(null) : startEdit(ex)}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontWeight:600, fontSize:15, color:"#fff" }}>{ex.name}</div>
-                <div style={{ fontSize:12, color:"var(--muted)", marginTop:1 }}>{ex.muscle}</div>
-                {pr && (
-                  <div style={{ marginTop:4, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            style={{borderColor:pr?rank.color+"28":"var(--bdr)",marginBottom:8}}>
+            <div className="row" style={{cursor:"pointer"}} onClick={()=>isOpen?setEditing(null):startEdit(ex)}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{fontWeight:600,fontSize:15,color:"#fff"}}>{ex.name}</div>
+                  {isUni&&<span style={{fontSize:10,color:"var(--purp)",background:"rgba(168,85,247,.12)",border:"1px solid rgba(168,85,247,.3)",borderRadius:10,padding:"1px 6px"}}>unilateral</span>}
+                  {ex.isCustom&&<span style={{fontSize:10,color:"var(--gld)",background:"rgba(251,191,36,.1)",border:"1px solid rgba(251,191,36,.25)",borderRadius:10,padding:"1px 6px"}}>eigene</span>}
+                </div>
+                <div style={{fontSize:12,color:"var(--muted)",marginTop:1}}>{ex.muscle}</div>
+                {pr&&!ex.isCustom&&(
+                  <div style={{marginTop:4,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                     <Badge score={score} />
-                    <span style={{ fontSize:11, color:"var(--muted)" }}>Top {scoreToTopPct(score)}%</span>
-                    {improvement && <span style={{ fontSize:11, color:"var(--grn)" }}>{improvement}</span>}
+                    <span style={{fontSize:11,color:"var(--muted)"}}>Top {scoreToTopPct(score)}%</span>
+                    {improvement&&<span style={{fontSize:11,color:"var(--grn)"}}>{improvement}</span>}
                   </div>
                 )}
-                {/* sparkline */}
-                {hist.length >= 2 && (
-                  <div className="sparkline" style={{ height:24, marginTop:6 }}>
-                    {hist.map((h, i) => {
-                      const s = getExScore(ex, h);
-                      const max = Math.max(...hist.map(hh => getExScore(ex, hh)), 1);
-                      return <div key={i} className="spark-bar" style={{ height:`${(s/max)*100}%`, background:rank.color+"88" }} />;
+                {/* Sparkline */}
+                {hist.length>=2&&!ex.isCustom&&(
+                  <div className="sparkline" style={{height:24,marginTop:6}}>
+                    {hist.map((h,i)=>{
+                      const s=getExScore(ex,h);
+                      const max=Math.max(...hist.map(hh=>getExScore(ex,hh)),1);
+                      return <div key={i} className="spark-bar" style={{height:`${(s/max)*100}%`,background:rank.color+"88"}} />;
                     })}
-                    <span style={{ fontSize:10, color:"var(--muted)", marginLeft:4, alignSelf:"flex-end" }}>history</span>
+                    <span style={{fontSize:10,color:"var(--muted)",marginLeft:4,alignSelf:"flex-end"}}>Verlauf</span>
                   </div>
                 )}
               </div>
-              <div style={{ textAlign:"right", marginRight:12 }}>
-                {pr ? (
+              <div style={{textAlign:"right",marginRight:12}}>
+                {pr?(
                   ex.isReps
-                    ? <div style={{ fontFamily:"var(--head)", fontSize:20, fontWeight:700, color:rank.color }}>{pr.reps} reps</div>
-                    : <div style={{ fontFamily:"var(--head)", fontSize:20, fontWeight:700, color:rank.color }}>{pr.weight} kg × {pr.reps}</div>
-                ) : <span style={{ fontSize:13, color:"var(--muted)" }}>No PR</span>}
-                {pr && <div style={{ fontFamily:"var(--head)", fontSize:13, color:"var(--muted)" }}>Score {score}</div>}
+                    ?<div style={{fontFamily:"var(--head)",fontSize:20,fontWeight:700,color:rank.color}}>{pr.reps} Wdh.</div>
+                    :<div style={{fontFamily:"var(--head)",fontSize:20,fontWeight:700,color:rank.color}}>{pr.weight} kg × {pr.reps}</div>
+                ):<span style={{fontSize:13,color:"var(--muted)"}}>Kein PR</span>}
+                {pr&&!ex.isCustom&&<div style={{fontFamily:"var(--head)",fontSize:13,color:"var(--muted)"}}>Score {score}</div>}
               </div>
-              <div style={{ color:"var(--muted)", fontSize:14 }}>{isOpen?"▲":"▼"}</div>
+              <div style={{color:"var(--muted)",fontSize:14}}>{isOpen?"▲":"▼"}</div>
             </div>
 
-            {isOpen && (
-              <div style={{ padding:"0 16px 16px" }}>
-                <div className="note"><span className="note-i">ℹ</span><span>{ex.note}</span></div>
-                <div style={{ height:12 }} />
+            {isOpen&&(
+              <div style={{padding:"0 16px 16px"}}>
+                {/* Previous PR comparison */}
+                {pr?(
+                  <div className="impr-banner">
+                    <span>📌</span>
+                    <span>
+                      Aktuell: {ex.isReps?`${pr.reps} Wdh.`:`${pr.weight} kg × ${pr.reps}`}
+                      {!ex.isReps&&<> · Est. 1RM: {Math.round(epley1RM(pr.weight,pr.reps))} kg</>}
+                      {" · "}{fmtDate(pr.date)}
+                    </span>
+                  </div>
+                ):(
+                  <div className="impr-banner none">
+                    <span>ℹ️</span>
+                    <span>Noch kein PR für diese Übung eingetragen.</span>
+                  </div>
+                )}
+                {prevPR&&!ex.isCustom&&(
+                  <div style={{fontSize:12,color:"var(--muted)",marginBottom:10}}>
+                    Letzter Eintrag: {ex.isReps?`${prevPR.reps} Wdh.`:`${prevPR.weight} kg × ${prevPR.reps}`} ({fmtDate(prevPR.date)})
+                    {" · "}
+                    {(()=>{
+                      const diffScore=score-getExScore(ex,prevPR);
+                      if(diffScore>0) return <span style={{color:"var(--grn)"}}>+{Math.round(diffScore)} Pkt ↑</span>;
+                      if(diffScore<0) return <span style={{color:"var(--red)"}}>{Math.round(diffScore)} Pkt ↓</span>;
+                      return <span style={{color:"var(--muted)"}}>gleich</span>;
+                    })()}
+                  </div>
+                )}
 
-                {ex.isReps ? (
+                {!ex.isCustom&&<div className="note"><span className="note-i">ℹ</span><span>{ex.note}</span></div>}
+                <div style={{height:12}} />
+
+                {ex.isReps?(
                   <div className="fg">
-                    <label className="flbl">Reps (bodyweight)</label>
-                    <input className="finp" type="number" value={reps} onChange={e=>setReps(e.target.value)} placeholder="e.g. 10" />
+                    <label className="flbl">Wiederholungen (Körpergewicht)</label>
+                    <input className="finp" type="number" inputMode="numeric" value={reps} onChange={e=>setReps(e.target.value)} placeholder="z.B. 10" />
                   </div>
-                ) : (
-                  <div className="fr2" style={{ marginBottom:12 }}>
-                    <div><label className="flbl">Weight (kg)</label><input className="finp" type="number" value={weight} onChange={e=>setWeight(e.target.value)} placeholder="e.g. 80" /></div>
-                    <div><label className="flbl">Reps</label><input className="finp" type="number" value={reps} onChange={e=>setReps(e.target.value)} placeholder="e.g. 5" /></div>
+                ):(
+                  <div className="fr2" style={{marginBottom:12}}>
+                    <div>
+                      <label className="flbl">Gewicht (kg){isUni?" pro Seite":""}</label>
+                      <input className="finp" type="number" inputMode="decimal" value={weight} onChange={e=>setWeight(e.target.value)} placeholder="z.B. 80" />
+                    </div>
+                    <div>
+                      <label className="flbl">Wiederholungen</label>
+                      <input className="finp" type="number" inputMode="numeric" value={reps} onChange={e=>setReps(e.target.value)} placeholder="z.B. 5" />
+                    </div>
                   </div>
                 )}
 
-                {preview !== null && (
-                  <div className="hint" style={{ marginBottom:12 }}>
-                    Estimated rank: <strong style={{ color:getRank(preview).color }}>{getRank(preview).name}</strong>
-                    {" · "}Score: <strong style={{ color:getRank(preview).color }}>{Math.round(preview)}</strong>
-                    {" · "}Top: <strong style={{ color:getRank(preview).color }}>{scoreToTopPct(preview)}%</strong>
-                    <br />Reference: Novice {ex.isReps ? ex.s.nov+" reps" : ex.s.nov+" kg"} · Advanced {ex.isReps ? ex.s.adv+" reps" : ex.s.adv+" kg"} · Elite {ex.isReps ? ex.s.eli+" reps" : ex.s.eli+" kg"}
+                {preview!==null&&!ex.isCustom&&(
+                  <div className="hint" style={{marginBottom:12}}>
+                    Rang: <strong style={{color:getRank(preview).color}}>{getRank(preview).name}</strong>
+                    {" · "}Score: <strong style={{color:getRank(preview).color}}>{Math.round(preview)}</strong>
+                    {" · "}Top: <strong style={{color:getRank(preview).color}}>{scoreToTopPct(preview)}%</strong>
+                    <br />Referenz: Novice {ex.isReps?ex.s.nov+" Wdh.":ex.s.nov+" kg"} · Advanced {ex.isReps?ex.s.adv+" Wdh.":ex.s.adv+" kg"} · Elite {ex.isReps?ex.s.eli+" Wdh.":ex.s.eli+" kg"}
                   </div>
                 )}
-                <button className="btn" style={{ fontSize:13 }} onClick={() => save(ex)}>Save PR</button>
+
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <button className="btn" style={{flex:1,fontSize:13}} onClick={()=>save(ex)}>PR speichern</button>
+                  <button className="btn-i" title="Einstellungen" onClick={e=>{e.stopPropagation();setShowSettings(showSet?null:ex.id);}}>⚙️</button>
+                </div>
+
+                {showSet&&(
+                  <div style={{background:"var(--bg2)",border:"1px solid var(--bdr)",borderRadius:8,padding:12,marginBottom:8}}>
+                    <div style={{fontFamily:"var(--head)",fontSize:11,letterSpacing:2,color:"var(--muted)",marginBottom:10}}>ÜBUNGSEINSTELLUNGEN</div>
+                    <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",fontSize:14}}>
+                      <input type="checkbox" checked={isUni} onChange={()=>toggleUnilateral(ex.id)} style={{width:18,height:18,accentColor:"var(--purp)"}} />
+                      <span>Unilateral ausführen (z.B. einarmig)</span>
+                    </label>
+                    <div style={{fontSize:12,color:"var(--muted)",marginTop:4}}>
+                      Markiert diese Übung als unilateral. Wirkt nur als Hinweis – die Gewichtswertung bleibt gleich.
+                    </div>
+                    {pr&&(
+                      <button className="btn-d" style={{marginTop:10,width:"100%"}} onClick={()=>{if(window.confirm("PR löschen?"))deletePR(ex.id);}}>
+                        PR löschen
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -687,402 +882,329 @@ function PRsTab({ prs, setPrs, prHistory }) {
 
 /* ═══════════════════════════════════════════════════════════  PR CELEBRATION MODAL  */
 function PRModal({ newPRs, onClose }) {
-  if (!newPRs || newPRs.length === 0) return null;
+  if (!newPRs||newPRs.length===0) return null;
   return (
-    <div style={{
-      position:"fixed", inset:0, zIndex:1000,
-      background:"rgba(0,0,0,0.75)", backdropFilter:"blur(4px)",
-      display:"flex", alignItems:"center", justifyContent:"center", padding:20,
-    }}>
-      <div style={{
-        background:"var(--surf)", border:"1px solid rgba(251,191,36,0.4)",
-        borderRadius:16, padding:"28px 24px", maxWidth:380, width:"100%",
-        boxShadow:"0 0 60px rgba(251,191,36,0.15)",
-        animation:"popIn .35s cubic-bezier(0.175,0.885,0.32,1.275)",
-      }}>
-        {/* Fireworks header */}
-        <div style={{ textAlign:"center", marginBottom:20 }}>
-          <div style={{ fontSize:52, lineHeight:1, marginBottom:8 }}>🏆</div>
-          <div style={{
-            fontFamily:"var(--head)", fontSize:28, fontWeight:800,
-            color:"var(--gld)", letterSpacing:1, marginBottom:4,
-          }}>
-            {newPRs.length === 1 ? "New Personal Record!" : `${newPRs.length} New Records!`}
+    <div style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"var(--surf)",border:"1px solid rgba(251,191,36,0.4)",borderRadius:16,padding:"28px 24px",maxWidth:380,width:"100%",boxShadow:"0 0 60px rgba(251,191,36,0.15)",animation:"popIn .35s cubic-bezier(0.175,0.885,0.32,1.275)"}}>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:52,lineHeight:1,marginBottom:8}}>🏆</div>
+          <div style={{fontFamily:"var(--head)",fontSize:28,fontWeight:800,color:"var(--gld)",letterSpacing:1,marginBottom:4}}>
+            {newPRs.length===1?"Neuer Persönlicher Rekord!":`${newPRs.length} Neue Rekorde!`}
           </div>
-          <div style={{ fontSize:14, color:"var(--text2)" }}>
-            You crushed it today. Keep going! 💪
-          </div>
+          <div style={{fontSize:14,color:"var(--text2)"}}>Du hast es heute zertrümmert. Weiter so! 💪</div>
         </div>
-
-        {/* PR list */}
-        <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
-          {newPRs.map((pr, i) => {
-            const r = getRank(pr.newScore);
-            const improved = pr.oldScore > 0;
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+          {newPRs.map((pr,i)=>{
+            const r=getRank(pr.newScore),improved=pr.oldScore>0;
             return (
-              <div key={i} style={{
-                background:`linear-gradient(135deg, ${r.bg}, rgba(0,0,0,0))`,
-                border:`1px solid ${r.color}40`,
-                borderRadius:10, padding:"12px 14px",
-              }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div key={i} style={{background:`linear-gradient(135deg,${r.bg},rgba(0,0,0,0))`,border:`1px solid ${r.color}40`,borderRadius:10,padding:"12px 14px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                   <div>
-                    <div style={{ fontWeight:600, fontSize:15, color:"#fff", marginBottom:3 }}>{pr.name}</div>
-                    <div style={{ fontFamily:"var(--head)", fontSize:20, fontWeight:800, color:r.color }}>
-                      {pr.isReps ? `${pr.reps} reps` : `${pr.weight} kg × ${pr.reps}`}
+                    <div style={{fontWeight:600,fontSize:15,color:"#fff",marginBottom:3}}>{pr.name}</div>
+                    <div style={{fontFamily:"var(--head)",fontSize:20,fontWeight:800,color:r.color}}>
+                      {pr.isReps?`${pr.reps} Wdh.`:`${pr.weight} kg × ${pr.reps}`}
                     </div>
-                    {!pr.isReps && (
-                      <div style={{ fontSize:12, color:"var(--muted)", marginTop:2 }}>
-                        Est. 1RM: {Math.round(epley1RM(pr.weight, pr.reps))} kg
-                      </div>
-                    )}
+                    {!pr.isReps&&<div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>Est. 1RM: {Math.round(epley1RM(pr.weight,pr.reps))} kg</div>}
                   </div>
-                  <div style={{ textAlign:"right" }}>
-                    <span className="badge" style={{ color:r.color, borderColor:r.color+"44", background:r.bg }}>
-                      {r.name}
-                    </span>
-                    {improved && (
-                      <div style={{ fontSize:12, color:"var(--grn)", marginTop:4 }}>
-                        +{Math.round(pr.newScore - pr.oldScore)} pts
-                      </div>
-                    )}
-                    {!improved && (
-                      <div style={{ fontSize:12, color:"var(--gld)", marginTop:4 }}>First PR!</div>
-                    )}
+                  <div style={{textAlign:"right"}}>
+                    <span className="badge" style={{color:r.color,borderColor:r.color+"44",background:r.bg}}>{r.name}</span>
+                    {improved&&<div style={{fontSize:12,color:"var(--grn)",marginTop:4}}>+{Math.round(pr.newScore-pr.oldScore)} Pkt</div>}
+                    {!improved&&<div style={{fontSize:12,color:"var(--gld)",marginTop:4}}>Erstes PR!</div>}
                   </div>
                 </div>
               </div>
             );
           })}
         </div>
+        <button className="btn" onClick={onClose}>Zurück zum Log</button>
+      </div>
+    </div>
+  );
+}
 
-        <button className="btn" onClick={onClose}>
-          Back to Log
-        </button>
+/* ═══════════════════════════════════════════════════════════  SESSION SUMMARY  */
+function SessionSummary({ session, onClose, userProfile }) {
+  if (!session) return null;
+  const calories = estimateCalories(session, userProfile?.weight||80);
+  const topSet = session.exercises.reduce((best, e) => {
+    const vol = e.sets.reduce((s,st)=>s+st.weight*st.reps,0);
+    return vol>best.vol?{name:e.name,vol}:best;
+  }, {name:"",vol:0});
+
+  return (
+    <div className="summary-overlay" onClick={onClose}>
+      <div className="summary-sheet" onClick={e=>e.stopPropagation()}>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:40,lineHeight:1,marginBottom:8}}>✅</div>
+          <div style={{fontFamily:"var(--head)",fontSize:24,fontWeight:800,color:"#fff",marginBottom:4}}>Einheit gespeichert!</div>
+          <div style={{fontSize:14,color:"var(--text2)"}}>{fmtDate(session.date)} · {session.note||"Workout"}</div>
+        </div>
+
+        <div style={{background:"var(--bg2)",borderRadius:10,padding:"4px 0",marginBottom:16}}>
+          <div className="summary-stat">
+            <span style={{color:"var(--text2)"}}>Übungen</span>
+            <span style={{fontFamily:"var(--head)",fontWeight:700,color:"#fff"}}>{session.exercises.length}</span>
+          </div>
+          <div className="summary-stat">
+            <span style={{color:"var(--text2)"}}>Sätze gesamt</span>
+            <span style={{fontFamily:"var(--head)",fontWeight:700,color:"#fff"}}>{session.totalSets}</span>
+          </div>
+          <div className="summary-stat">
+            <span style={{color:"var(--text2)"}}>Volumen</span>
+            <span style={{fontFamily:"var(--head)",fontWeight:700,color:"var(--acc)"}}>{session.totalVol>=1000?(session.totalVol/1000).toFixed(1)+"t":session.totalVol+" kg"}</span>
+          </div>
+          <div className="summary-stat">
+            <span style={{color:"var(--text2)"}}>Kalorienverbrauch ca.</span>
+            <span style={{fontFamily:"var(--head)",fontWeight:700,color:"var(--red)"}}>~{calories} kcal 🔥</span>
+          </div>
+          {session.newPRIds&&session.newPRIds.length>0&&(
+            <div className="summary-stat">
+              <span style={{color:"var(--text2)"}}>Neue PRs</span>
+              <span style={{fontFamily:"var(--head)",fontWeight:700,color:"var(--gld)"}}>🏆 {session.newPRIds.length}</span>
+            </div>
+          )}
+          {topSet.name&&(
+            <div className="summary-stat">
+              <span style={{color:"var(--text2)"}}>Top Übung</span>
+              <span style={{fontFamily:"var(--head)",fontWeight:600,color:"var(--grn)",fontSize:13}}>{topSet.name}</span>
+            </div>
+          )}
+        </div>
+
+        <button className="btn" onClick={onClose}>Weiter</button>
       </div>
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════════════════════  TRAINING LOG  */
-function LogTab({ sessions, setSessions, prs, setPrs }) {
-  const [view, setView]       = useState("list");
-  const [expanded, setExp]    = useState(null);
-  const [sDate, setDate]      = useState(todayISO());
-  const [sNote, setNote]      = useState("");
-  const [entries, setEnt]     = useState([{ exId: ALL_EX[0].id, sets:[{weight:"",reps:""}] }]);
-  const [celebPRs, setCelebPRs] = useState(null); // null = hidden, array = show modal
+function LogTab({ sessions, setSessions, prs, setPrs, userProfile, customExercises }) {
+  const [view,     setView]      = useState("list");
+  const [expanded, setExp]       = useState(null);
+  const [sDate,    setDate]      = useState(todayISO());
+  const [sNote,    setNote]      = useState("");
+  const [entries,  setEnt]       = useState([{exId:ALL_EX[0].id,sets:[{weight:"",reps:""}]}]);
+  const [celebPRs, setCelebPRs]  = useState(null);
+  const [summary,  setSummary]   = useState(null);
 
-  const addEntry   = () => setEnt(p=>[...p,{exId:ALL_EX[0].id,sets:[{weight:"",reps:""}]}]);
-  const rmEntry    = i  => setEnt(p=>p.filter((_,j)=>j!==i));
-  const setEx      = (i,v)    => setEnt(p=>p.map((e,j)=>j===i?{...e,exId:v}:e));
-  const addSet     = i        => setEnt(p=>p.map((e,j)=>j===i?{...e,sets:[...e.sets,{weight:"",reps:""}]}:e));
-  const rmSet      = (i,s)    => setEnt(p=>p.map((e,j)=>j===i?{...e,sets:e.sets.filter((_,k)=>k!==s)}:e));
+  const allExercises = useMemo(()=>[
+    ...ALL_EX,
+    ...(customExercises||[]).map(ce=>({...ce,muscle:ce.muscle||"Custom",isCustom:true})),
+  ],[customExercises]);
+
+  const addEntry   = ()   => setEnt(p=>[...p,{exId:ALL_EX[0].id,sets:[{weight:"",reps:""}]}]);
+  const rmEntry    = i    => setEnt(p=>p.filter((_,j)=>j!==i));
+  const setEx      = (i,v)=> setEnt(p=>p.map((e,j)=>j===i?{...e,exId:v}:e));
+  const addSet     = i    => setEnt(p=>p.map((e,j)=>j===i?{...e,sets:[...e.sets,{weight:e.sets[e.sets.length-1]?.weight||"",reps:""}]}:e));
+  const rmSet      = (i,s)=> setEnt(p=>p.map((e,j)=>j===i?{...e,sets:e.sets.filter((_,k)=>k!==s)}:e));
   const updSet     = (i,s,f,v)=> setEnt(p=>p.map((e,j)=>j===i?{...e,sets:e.sets.map((st,k)=>k===s?{...st,[f]:v}:st)}:e));
 
-  // Compute the best set score for a given entry's sets against the exercise definition
-  const bestSetScore = (entry) => {
-    const ex = ALL_EX.find(x => x.id === entry.exId);
-    if (!ex) return 0;
-    return entry.sets.reduce((best, set) => {
-      const w = Number(set.weight) || 0;
-      const r = Number(set.reps)   || 0;
-      if (!r) return best;
-      const s = ex.isReps ? calcRepsScore(r, ex.s) : calcScore(w, r, ex.s);
-      return s > best ? s : best;
-    }, 0);
+  const isSetPR = (exId,weight,reps) => {
+    const ex=allExercises.find(x=>x.id===exId);
+    if (!ex||!reps||ex.isCustom) return false;
+    const existingPR=prs[exId];
+    const newScore=ex.isReps?calcRepsScore(reps,ex.s):calcScore(weight,reps,ex.s);
+    const oldScore=existingPR?getExScore(ex,existingPR):0;
+    return newScore>oldScore;
   };
 
-  // Compute the best single set (weight+reps) for an entry — highest estimated 1RM
-  const bestSet = (entry) => {
-    const ex = ALL_EX.find(x => x.id === entry.exId);
-    if (!ex) return null;
-    let best = null, bestVal = -1;
-    for (const set of entry.sets) {
-      const w = Number(set.weight) || 0;
-      const r = Number(set.reps)   || 0;
-      if (!r) continue;
-      const val = ex.isReps ? r : epley1RM(w, r);
-      if (val > bestVal) { bestVal = val; best = { weight:w, reps:r }; }
+  // Get last logged weight/reps for an exercise
+  const getLastLogged = (exId) => {
+    for (const s of sessions) {
+      const entry = s.exercises.find(e=>e.exId===exId||e.name===allExercises.find(x=>x.id===exId)?.name);
+      if (entry) {
+        const best = entry.sets.reduce((b,st)=>(!b||Number(st.weight)>Number(b.weight))?st:b, null);
+        return best ? `${best.weight>0?best.weight+" kg × ":""}${best.reps} Wdh. (${fmtShort(s.date)})` : null;
+      }
     }
-    return best;
-  };
-
-  // Is a particular set a PR for this exercise?
-  const isSetPR = (exId, weight, reps) => {
-    const ex = ALL_EX.find(x => x.id === exId);
-    if (!ex || !reps) return false;
-    const existingPR = prs[exId];
-    const newScore   = ex.isReps ? calcRepsScore(reps, ex.s) : calcScore(weight, reps, ex.s);
-    const oldScore   = existingPR ? getExScore(ex, existingPR) : 0;
-    return newScore > oldScore;
+    return null;
   };
 
   const save = () => {
-    const clean = entries.map(en => {
-      const ex   = ALL_EX.find(x => x.id === en.exId);
-      const sets = en.sets.filter(s => s.reps).map(s => ({
-        weight: Number(s.weight) || 0,
-        reps:   Number(s.reps),
-      }));
-      return sets.length ? { exId:en.exId, name:ex.name, muscle:ex.muscle, sets } : null;
+    const clean=entries.map(en=>{
+      const ex=allExercises.find(x=>x.id===en.exId);
+      const sets=en.sets.filter(s=>s.reps).map(s=>({weight:Number(s.weight)||0,reps:Number(s.reps)}));
+      return sets.length?{exId:en.exId,name:ex.name,muscle:ex.muscle,sets}:null;
     }).filter(Boolean);
     if (!clean.length) return;
 
-    // ── Detect & save new PRs ──────────────────────────────────────────
-    const newPRsList = [];
-    const updatedPRs = { ...prs };
-
+    const newPRsList=[];
+    const updatedPRs={...prs};
     for (const entry of clean) {
-      const ex = ALL_EX.find(x => x.id === entry.exId);
-      if (!ex) continue;
-
-      // Find the best set in this session entry (highest e1RM / most reps)
-      let bestW = 0, bestR = 0, bestVal = -1;
+      const ex=allExercises.find(x=>x.id===entry.exId);
+      if (!ex||ex.isCustom) continue;
+      let bestW=0,bestR=0,bestVal=-1;
       for (const set of entry.sets) {
-        const w = set.weight, r = set.reps;
-        const val = ex.isReps ? r : epley1RM(w, r);
-        if (val > bestVal) { bestVal = val; bestW = w; bestR = r; }
+        const w=set.weight,r=set.reps;
+        const val=ex.isReps?r:epley1RM(w,r);
+        if (val>bestVal){bestVal=val;bestW=w;bestR=r;}
       }
       if (!bestR) continue;
-
-      const newScore = ex.isReps ? calcRepsScore(bestR, ex.s) : calcScore(bestW, bestR, ex.s);
-      const existingPR = updatedPRs[ex.id];
-      const oldScore   = existingPR ? getExScore(ex, existingPR) : 0;
-
-      if (newScore > oldScore) {
-        // This is a new PR — save it automatically with today's date
-        updatedPRs[ex.id] = { weight: bestW, reps: bestR, date: sDate };
-        newPRsList.push({
-          id:       ex.id,
-          name:     ex.name,
-          muscle:   ex.muscle,
-          isReps:   !!ex.isReps,
-          weight:   bestW,
-          reps:     bestR,
-          newScore,
-          oldScore,
-        });
+      const newScore=ex.isReps?calcRepsScore(bestR,ex.s):calcScore(bestW,bestR,ex.s);
+      const existingPR=updatedPRs[ex.id];
+      const oldScore=existingPR?getExScore(ex,existingPR):0;
+      if (newScore>oldScore) {
+        updatedPRs[ex.id]={weight:bestW,reps:bestR,date:sDate};
+        newPRsList.push({id:ex.id,name:ex.name,muscle:ex.muscle,isReps:!!ex.isReps,weight:bestW,reps:bestR,newScore,oldScore});
       }
     }
+    if (newPRsList.length>0) setPrs(updatedPRs);
 
-    if (newPRsList.length > 0) {
-      setPrs(updatedPRs);
-    }
-    // ──────────────────────────────────────────────────────────────────
-
-    const totalVol  = clean.reduce((s,e) => s + e.sets.reduce((ss,st) => ss + st.weight * st.reps, 0), 0);
-    const totalSets = clean.reduce((s,e) => s + e.sets.length, 0);
-
-    // Tag session with which exercises set new PRs
-    const prExIds = new Set(newPRsList.map(p => p.id));
-    setSessions(prev => [{
-      id:       Date.now(),
-      date:     sDate,
-      note:     sNote,
-      exercises: clean,
-      totalVol,
-      totalSets,
-      newPRIds: [...prExIds],   // stored so the session card can show PR badges
-    }, ...prev]);
-
-    // Reset form state
-    setDate(todayISO()); setNote("");
-    setEnt([{ exId: ALL_EX[0].id, sets:[{weight:"",reps:""}] }]);
-
-    // Show modal if there are new PRs, otherwise go straight to list
-    if (newPRsList.length > 0) {
-      setCelebPRs(newPRsList);
-      setView("list");
-    } else {
-      setView("list");
-    }
+    const totalVol =clean.reduce((s,e)=>s+e.sets.reduce((ss,st)=>ss+st.weight*st.reps,0),0);
+    const totalSets=clean.reduce((s,e)=>s+e.sets.length,0);
+    const prExIds=new Set(newPRsList.map(p=>p.id));
+    const newSession = {
+      id:Date.now(),date:sDate,note:sNote,exercises:clean,
+      totalVol,totalSets,newPRIds:[...prExIds],
+    };
+    setSessions(prev=>[newSession,...prev]);
+    setDate(todayISO());setNote("");
+    setEnt([{exId:ALL_EX[0].id,sets:[{weight:"",reps:""}]}]);
+    setView("list");
+    if (newPRsList.length>0) setCelebPRs(newPRsList);
+    else setSummary(newSession);
   };
 
-  if (view === "add") return (
+  if (view==="add") return (
     <div className="scroll fi">
-      <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
-        <button className="btn-g" onClick={()=>setView("list")}>← Back</button>
-        <div className="h2">New Session</div>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+        <button className="btn-g" onClick={()=>setView("list")}>← Zurück</button>
+        <div className="h2">Neue Einheit</div>
       </div>
-      <div className="fr2" style={{ marginBottom:12 }}>
-        <div className="fg"><label className="flbl">Date</label><input className="finp" type="date" value={sDate} onChange={e=>setDate(e.target.value)} /></div>
-        <div className="fg"><label className="flbl">Label (optional)</label><input className="finp" value={sNote} onChange={e=>setNote(e.target.value)} placeholder="e.g. Push Day" /></div>
+      <div className="fr2" style={{marginBottom:12}}>
+        <div className="fg"><label className="flbl">Datum</label><input className="finp" type="date" value={sDate} onChange={e=>setDate(e.target.value)} /></div>
+        <div className="fg"><label className="flbl">Bezeichnung (optional)</label><input className="finp" value={sNote} onChange={e=>setNote(e.target.value)} placeholder="z.B. Push Day" /></div>
       </div>
-      <Lbl>Exercises</Lbl>
-      {entries.map((entry, ei) => {
-        const ex = ALL_EX.find(x => x.id === entry.exId);
-        // Check if any set in this entry is a live PR
-        const liveSetPRFlags = entry.sets.map(set => {
-          const w = Number(set.weight) || 0;
-          const r = Number(set.reps)   || 0;
-          return r > 0 && isSetPR(entry.exId, w, r);
+      <Lbl>Übungen</Lbl>
+      {entries.map((entry,ei)=>{
+        const ex=allExercises.find(x=>x.id===entry.exId);
+        const liveSetPRFlags=entry.sets.map(set=>{
+          const w=Number(set.weight)||0,r=Number(set.reps)||0;
+          return r>0&&isSetPR(entry.exId,w,r);
         });
-        const anyLivePR = liveSetPRFlags.some(Boolean);
+        const anyLivePR=liveSetPRFlags.some(Boolean);
+        const lastLogged=getLastLogged(entry.exId);
 
         return (
-          <div key={ei} style={{
-            background:"var(--bg)", borderRadius:8, padding:12, marginBottom:8,
-            border: anyLivePR
-              ? "1px solid rgba(251,191,36,0.5)"
-              : "1px solid var(--bdr)",
-            transition:"border-color .3s",
-          }}>
-            <div style={{ display:"flex",gap:8,alignItems:"center",marginBottom:8 }}>
-              <select className="fsel" style={{ flex:1 }} value={entry.exId} onChange={e => setEx(ei, e.target.value)}>
-                {MUSCLES.map(m => (
-                  <optgroup key={m} label={m}>
-                    {EX[m].map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </optgroup>
-                ))}
+          <div key={ei} style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:8,border:anyLivePR?"1px solid rgba(251,191,36,0.5)":"1px solid var(--bdr)",transition:"border-color .3s"}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+              <select className="fsel" style={{flex:1}} value={entry.exId} onChange={e=>setEx(ei,e.target.value)}>
+                {[...MUSCLES,"Custom"].map(m=>{
+                  const grpEx=[...ALL_EX.filter(x=>x.muscle===m),(customExercises||[]).filter(x=>!x.muscle||x.muscle===m).map(x=>({...x,muscle:m}))].flat();
+                  if(!grpEx.length)return null;
+                  return (
+                    <optgroup key={m} label={m}>
+                      {grpEx.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                    </optgroup>
+                  );
+                })}
               </select>
-              <button className="btn-i" onClick={() => rmEntry(ei)}>✕</button>
+              <button className="btn-i" onClick={()=>rmEntry(ei)}>✕</button>
             </div>
 
             {/* Exercise hint */}
-            {ex && <div style={{ fontSize:12,color:"var(--text2)",marginBottom:10,paddingLeft:2 }}>ℹ {ex.note}</div>}
+            {ex&&!ex.isCustom&&<div style={{fontSize:12,color:"var(--text2)",marginBottom:6,paddingLeft:2}}>ℹ {ex.note}</div>}
 
-            {/* Live PR banner — shown as soon as any set beats the current PR */}
-            {anyLivePR && (
-              <div style={{
-                display:"flex", alignItems:"center", gap:8,
-                background:"rgba(251,191,36,0.1)", border:"1px solid rgba(251,191,36,0.35)",
-                borderRadius:7, padding:"8px 12px", marginBottom:10,
-                animation:"fadeUp .25s ease",
-              }}>
-                <span style={{ fontSize:20 }}>🏆</span>
+            {/* Last logged */}
+            {lastLogged&&(
+              <div style={{fontSize:12,color:"var(--acc)",marginBottom:8,paddingLeft:2}}>
+                📌 Zuletzt: {lastLogged}
+              </div>
+            )}
+
+            {/* Live PR banner */}
+            {anyLivePR&&(
+              <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(251,191,36,0.1)",border:"1px solid rgba(251,191,36,0.35)",borderRadius:7,padding:"8px 12px",marginBottom:10,animation:"fadeUp .25s ease"}}>
+                <span style={{fontSize:20}}>🏆</span>
                 <div>
-                  <div style={{ fontFamily:"var(--head)", fontSize:14, fontWeight:700, color:"var(--gld)" }}>
-                    New Personal Record!
-                  </div>
-                  <div style={{ fontSize:12, color:"var(--text2)" }}>
-                    This set beats your previous best — it will be saved automatically.
-                  </div>
+                  <div style={{fontFamily:"var(--head)",fontSize:14,fontWeight:700,color:"var(--gld)"}}>Neuer Persönlicher Rekord!</div>
+                  <div style={{fontSize:12,color:"var(--text2)"}}>Dieser Satz schlägt deinen bisherigen Bestwert – wird automatisch gespeichert.</div>
                 </div>
               </div>
             )}
 
             {/* Sets */}
-            {entry.sets.map((set, si) => {
-              const w   = Number(set.weight) || 0;
-              const r   = Number(set.reps)   || 0;
-              const isPR = r > 0 && isSetPR(entry.exId, w, r);
+            {entry.sets.map((set,si)=>{
+              const w=Number(set.weight)||0,r=Number(set.reps)||0;
+              const isPR=r>0&&isSetPR(entry.exId,w,r);
               return (
-                <div key={si} style={{ display:"flex",gap:8,alignItems:"center",marginBottom:6 }}>
-                  <div style={{
-                    fontSize:12, width:18, textAlign:"center", flexShrink:0,
-                    color: isPR ? "var(--gld)" : "var(--muted)",
-                    fontWeight: isPR ? 700 : 400,
-                  }}>
-                    {isPR ? "★" : si + 1}
+                <div key={si} style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+                  <div style={{fontSize:12,width:18,textAlign:"center",flexShrink:0,color:isPR?"var(--gld)":"var(--muted)",fontWeight:isPR?700:400}}>
+                    {isPR?"★":si+1}
                   </div>
-                  {!ex?.isReps && (
-                    <input
-                      className="finp" type="number"
-                      value={set.weight}
-                      onChange={e => updSet(ei, si, "weight", e.target.value)}
-                      placeholder="kg"
-                      style={{ flex:1, borderColor: isPR ? "rgba(251,191,36,0.5)" : undefined }}
-                    />
+                  {!ex?.isReps&&(
+                    <input className="finp" type="number" inputMode="decimal" value={set.weight} onChange={e=>updSet(ei,si,"weight",e.target.value)} placeholder="kg" style={{flex:1,borderColor:isPR?"rgba(251,191,36,0.5)":undefined}} />
                   )}
-                  <input
-                    className="finp" type="number"
-                    value={set.reps}
-                    onChange={e => updSet(ei, si, "reps", e.target.value)}
-                    placeholder="reps"
-                    style={{ flex:1, borderColor: isPR ? "rgba(251,191,36,0.5)" : undefined }}
-                  />
-                  <button className="btn-i" onClick={() => rmSet(ei, si)} style={{ flexShrink:0 }}>−</button>
+                  <input className="finp" type="number" inputMode="numeric" value={set.reps} onChange={e=>updSet(ei,si,"reps",e.target.value)} placeholder="Wdh." style={{flex:1,borderColor:isPR?"rgba(251,191,36,0.5)":undefined}} />
+                  <button className="btn-i" onClick={()=>rmSet(ei,si)} style={{flexShrink:0}}>−</button>
                 </div>
               );
             })}
-            <button className="btn-i" style={{ fontSize:12,width:"100%",marginTop:4 }} onClick={() => addSet(ei)}>+ Set</button>
+            <button className="btn-add" style={{width:"100%",marginTop:4}} onClick={()=>addSet(ei)}>+ Satz</button>
           </div>
         );
       })}
-      <button className="btn-g" style={{ width:"100%",marginBottom:10,marginTop:4 }} onClick={addEntry}>+ Add Exercise</button>
-      <button className="btn" onClick={save}>Save Session</button>
+      <button className="btn-g" style={{width:"100%",marginBottom:10,marginTop:4}} onClick={addEntry}>+ Übung hinzufügen</button>
+      <button className="btn" onClick={save}>Einheit speichern</button>
     </div>
   );
 
   return (
     <>
-      {/* PR Celebration Modal */}
-      {celebPRs && (
-        <PRModal
-          newPRs={celebPRs}
-          onClose={() => setCelebPRs(null)}
-        />
-      )}
+      {celebPRs&&<PRModal newPRs={celebPRs} onClose={()=>{setCelebPRs(null);setSummary(sessions[0]);}} />}
+      {summary&&!celebPRs&&<SessionSummary session={summary} onClose={()=>setSummary(null)} userProfile={userProfile} />}
 
       <div className="scroll fi">
-        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16 }}>
-          <div className="h2">Training Log</div>
-          <button className="btn" style={{ width:"auto",padding:"9px 18px",fontSize:13 }} onClick={()=>setView("add")}>+ New Session</button>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+          <div className="h2">Trainingslog</div>
+          <button className="btn" style={{width:"auto",padding:"9px 18px",fontSize:13}} onClick={()=>setView("add")}>+ Neue Einheit</button>
         </div>
 
-        {sessions.length === 0 ? (
-          <div className="empty"><span className="empty-i">📋</span>No sessions yet.<br />Tap <strong style={{ color:"var(--acc)" }}>New Session</strong> to start.</div>
-        ) : sessions.map(s => {
-          const hasPRs = s.newPRIds && s.newPRIds.length > 0;
+        {sessions.length===0?(
+          <div className="empty"><span className="empty-i">📋</span>Noch keine Einheiten.<br />Tippe auf <strong style={{color:"var(--acc)"}}>Neue Einheit</strong> um zu starten.</div>
+        ):sessions.map(s=>{
+          const hasPRs=s.newPRIds&&s.newPRIds.length>0;
+          const cals=estimateCalories(s,userProfile?.weight||80);
           return (
-            <div key={s.id} className="sess" style={{ borderColor: hasPRs ? "rgba(251,191,36,0.3)" : undefined }}>
+            <div key={s.id} className="sess" style={{borderColor:hasPRs?"rgba(251,191,36,0.3)":undefined}}>
               <div className="sess-h" onClick={()=>setExp(expanded===s.id?null:s.id)}>
-                <div style={{ flex:1 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <div style={{ fontFamily:"var(--head)",fontSize:17,fontWeight:700,color:"#fff" }}>
-                      {s.note || "Workout"}
-                    </div>
-                    {hasPRs && (
-                      <div style={{
-                        fontFamily:"var(--head)", fontSize:11, fontWeight:700,
-                        color:"var(--gld)", background:"rgba(251,191,36,0.12)",
-                        border:"1px solid rgba(251,191,36,0.35)",
-                        borderRadius:20, padding:"2px 8px", letterSpacing:"0.5px",
-                      }}>
-                        🏆 {s.newPRIds.length} PR{s.newPRIds.length > 1 ? "s" : ""}
-                      </div>
-                    )}
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{fontFamily:"var(--head)",fontSize:17,fontWeight:700,color:"#fff"}}>{s.note||"Workout"}</div>
+                    {hasPRs&&<div style={{fontFamily:"var(--head)",fontSize:11,fontWeight:700,color:"var(--gld)",background:"rgba(251,191,36,0.12)",border:"1px solid rgba(251,191,36,0.35)",borderRadius:20,padding:"2px 8px",letterSpacing:"0.5px"}}>🏆 {s.newPRIds.length} PR{s.newPRIds.length>1?"s":""}</div>}
                   </div>
-                  <div style={{ fontSize:12,color:"var(--muted)",marginTop:2 }}>
-                    {fmtDate(s.date)} · {s.exercises.length} exercises · {s.totalSets} sets
+                  <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>
+                    {fmtDate(s.date)} · {s.exercises.length} Übungen · {s.totalSets} Sätze · 🔥{cals} kcal
                   </div>
                 </div>
-                <div style={{ textAlign:"right", marginLeft:8 }}>
-                  <div style={{ fontFamily:"var(--head)",fontSize:16,fontWeight:700,color:"var(--acc)" }}>
-                    {s.totalVol>=1000 ? (s.totalVol/1000).toFixed(1)+"t" : s.totalVol+" kg"}
-                  </div>
-                  <div style={{ fontSize:11,color:"var(--muted)" }}>volume</div>
+                <div style={{textAlign:"right",marginLeft:8}}>
+                  <div style={{fontFamily:"var(--head)",fontSize:16,fontWeight:700,color:"var(--acc)"}}>{s.totalVol>=1000?(s.totalVol/1000).toFixed(1)+"t":s.totalVol+" kg"}</div>
+                  <div style={{fontSize:11,color:"var(--muted)"}}>Volumen</div>
                 </div>
               </div>
 
-              {expanded === s.id && (
+              {expanded===s.id&&(
                 <div className="sess-b">
-                  {s.exercises.map((e, i) => {
-                    const isPREx = s.newPRIds && s.newPRIds.includes(e.exId);
+                  {s.exercises.map((e,i)=>{
+                    const isPREx=s.newPRIds&&s.newPRIds.includes(e.exId);
                     return (
-                      <div key={i} className="sess-row" style={{ borderColor: isPREx ? "rgba(251,191,36,0.2)" : undefined }}>
+                      <div key={i} className="sess-row" style={{borderColor:isPREx?"rgba(251,191,36,0.2)":undefined}}>
                         <div>
-                          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                            <div style={{ fontWeight:600 }}>{e.name}</div>
-                            {isPREx && <span style={{ fontSize:13 }}>🏆</span>}
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <div style={{fontWeight:600}}>{e.name}</div>
+                            {isPREx&&<span style={{fontSize:13}}>🏆</span>}
                           </div>
-                          <div style={{ fontSize:12,color:"var(--muted)" }}>{e.muscle}</div>
+                          <div style={{fontSize:12,color:"var(--muted)"}}>{e.muscle}</div>
                         </div>
-                        <div style={{ textAlign:"right" }}>
+                        <div style={{textAlign:"right"}}>
                           {e.sets.map((st,si)=>(
-                            <div key={si} style={{ fontSize:13 }}>
-                              {st.weight > 0 ? `${st.weight} kg × ${st.reps}` : `${st.reps} reps`}
-                            </div>
+                            <div key={si} style={{fontSize:13}}>{st.weight>0?`${st.weight} kg × ${st.reps}`:`${st.reps} Wdh.`}</div>
                           ))}
                         </div>
                       </div>
                     );
                   })}
-                  <button className="btn-d" style={{ marginTop:10 }}
-                    onClick={() => setSessions(p => p.filter(x => x.id !== s.id))}>
-                    Delete
-                  </button>
+                  <button className="btn-d" style={{marginTop:10}} onClick={()=>setSessions(p=>p.filter(x=>x.id!==s.id))}>Löschen</button>
                 </div>
               )}
             </div>
@@ -1094,222 +1216,139 @@ function LogTab({ sessions, setSessions, prs, setPrs }) {
 }
 
 /* ═══════════════════════════════════════════════════════════  STATS TAB  */
-function StatsTab({ sessions, prs }) {
-  const hasSessions = sessions.length > 0;
-  const hasPRs      = Object.keys(prs).length > 0;
+function StatsTab({ sessions, prs, userProfile, bodyWeightLog }) {
+  const hasSessions=sessions.length>0, hasPRs=Object.keys(prs).length>0;
 
-  const stats = useMemo(() => {
+  const stats=useMemo(()=>{
     if (!hasSessions) return null;
-    const sorted   = [...sessions].sort((a,b)=>a.date.localeCompare(b.date));
-    const total    = sessions.length;
-    const totalVol = sessions.reduce((s,x)=>s+x.totalVol,0);
-    const totalSets= sessions.reduce((s,x)=>s+x.totalSets,0);
-    const avgVol   = Math.round(totalVol/total);
+    const sorted=[...sessions].sort((a,b)=>a.date.localeCompare(b.date));
+    const total=sessions.length;
+    const totalVol=sessions.reduce((s,x)=>s+x.totalVol,0);
+    const totalSets=sessions.reduce((s,x)=>s+x.totalSets,0);
+    const avgVol=Math.round(totalVol/total);
+    const totalCals=sessions.reduce((s,x)=>s+estimateCalories(x,userProfile?.weight||80),0);
 
-    // Streak
-    const dateSet = new Set(sessions.map(s=>s.date));
+    const dateSet=new Set(sessions.map(s=>s.date));
     let streak=0;
-    for(let i=0;i<365;i++){
-      const d=new Date(); d.setDate(d.getDate()-i);
-      const iso=d.toISOString().slice(0,10);
-      if(dateSet.has(iso)) streak++; else if(i>0) break;
-    }
-    // Best streak ever
-    const allDates = [...dateSet].sort();
-    let bestStreak=0, cur=0;
-    for(let i=0;i<allDates.length;i++){
-      if(i===0){ cur=1; continue; }
-      const prev=new Date(allDates[i-1]+"T00:00:00");
-      const this_=new Date(allDates[i]+"T00:00:00");
-      const diff=(this_-prev)/86400000;
-      if(diff===1) cur++; else cur=1;
-      if(cur>bestStreak) bestStreak=cur;
-    }
+    for(let i=0;i<365;i++){const d=new Date();d.setDate(d.getDate()-i);const iso=d.toISOString().slice(0,10);if(dateSet.has(iso))streak++;else if(i>0)break;}
+    const allDates=[...dateSet].sort();
+    let bestStreak=0,cur=0;
+    for(let i=0;i<allDates.length;i++){if(i===0){cur=1;continue;}const prev=new Date(allDates[i-1]+"T00:00:00"),this_=new Date(allDates[i]+"T00:00:00"),diff=(this_-prev)/86400000;if(diff===1)cur++;else cur=1;if(cur>bestStreak)bestStreak=cur;}
     bestStreak=Math.max(bestStreak,streak);
 
-    // Monthly sessions (last 6 months)
     const months=[];
-    for(let i=5;i>=0;i--){
-      const d=new Date(); d.setMonth(d.getMonth()-i);
-      const key=d.toISOString().slice(0,7);
-      const lbl=d.toLocaleDateString("en-US",{month:"short"});
-      months.push({ key, lbl, count:sessions.filter(s=>s.date.startsWith(key)).length });
-    }
+    for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const key=d.toISOString().slice(0,7),lbl=d.toLocaleDateString("de-AT",{month:"short"});months.push({key,lbl,count:sessions.filter(s=>s.date.startsWith(key)).length});}
 
     const daysSince=Math.max(1,Math.ceil((new Date()-new Date(sorted[0].date+"T00:00:00"))/86400000));
     const avgPerWeek=(total/Math.max(1,daysSince/7)).toFixed(1);
     const consistency=Math.min(100,Math.round((total/daysSince)*7*25));
+    const volByMonth=months.map(m=>({...m,vol:sessions.filter(s=>s.date.startsWith(m.key)).reduce((s,x)=>s+x.totalVol,0)}));
 
-    // Volume over last 6 months
-    const volByMonth=months.map(m=>({
-      ...m,
-      vol:sessions.filter(s=>s.date.startsWith(m.key)).reduce((s,x)=>s+x.totalVol,0)
-    }));
-
-    // Muscle volume
     const muscleVol={};
-    sessions.forEach(s=>s.exercises.forEach(e=>{
-      const vol=e.sets.reduce((s,st)=>s+st.weight*st.reps,0);
-      muscleVol[e.muscle]=(muscleVol[e.muscle]||0)+vol;
-    }));
+    sessions.forEach(s=>s.exercises.forEach(e=>{const vol=e.sets.reduce((s,st)=>s+st.weight*st.reps,0);muscleVol[e.muscle]=(muscleVol[e.muscle]||0)+vol;}));
     const topMuscles=Object.entries(muscleVol).sort((a,b)=>b[1]-a[1]);
 
-    // Exercise frequency
     const exFreq={};
     sessions.forEach(s=>s.exercises.forEach(e=>{exFreq[e.name]=(exFreq[e.name]||0)+1;}));
     const topEx=Object.entries(exFreq).sort((a,b)=>b[1]-a[1]).slice(0,5);
-
-    // PR count by muscle
     const prByMuscle=MUSCLES.reduce((acc,m)=>({...acc,[m]:EX[m].filter(e=>prs[e.id]).length}),{});
 
-    return { total,totalVol,totalSets,avgVol,streak,bestStreak,months,avgPerWeek,consistency,volByMonth,topMuscles,topEx,prByMuscle,daysSince };
-  }, [sessions, prs]);
+    return {total,totalVol,totalSets,avgVol,streak,bestStreak,months,avgPerWeek,consistency,volByMonth,topMuscles,topEx,prByMuscle,daysSince,totalCals};
+  },[sessions,prs,userProfile]);
 
-  // Muscle balance
-  const muscleBalance = useMemo(() => {
-    return MUSCLES.map(m => ({
-      muscle:m,
-      score: getMuscleScore(m, prs),
-      prCount: EX[m].filter(e => prs[e.id]).length,
-      total: EX[m].length,
-    }));
-  }, [prs]);
-
-  const overallScore = useMemo(() => {
-    const f = muscleBalance.filter(m => m.score > 0);
-    return f.length ? Math.round(f.reduce((s,m) => s+m.score, 0) / f.length) : 0;
-  }, [muscleBalance]);
-
-  // Top PRs
-  const topPRs = useMemo(() => {
-    return ALL_EX.filter(e=>prs[e.id])
-      .map(e => { const pr=prs[e.id]; const score=getExScore(e,pr); return {...e,pr,score}; })
-      .sort((a,b)=>b.score-a.score).slice(0,6);
-  }, [prs]);
-
+  const muscleBalance=useMemo(()=>MUSCLES.map(m=>({muscle:m,score:getMuscleScore(m,prs),prCount:EX[m].filter(e=>prs[e.id]).length,total:EX[m].length})),[prs]);
+  const overallScore=useMemo(()=>{const f=muscleBalance.filter(m=>m.score>0);return f.length?Math.round(f.reduce((s,m)=>s+m.score,0)/f.length):0;},[muscleBalance]);
+  const topPRs=useMemo(()=>ALL_EX.filter(e=>prs[e.id]).map(e=>{const pr=prs[e.id],score=getExScore(e,pr);return {...e,pr,score};}).sort((a,b)=>b.score-a.score).slice(0,6),[prs]);
   const COLORS=["var(--acc)","var(--grn)","var(--gld)","#a855f7","var(--red)","#f97316"];
 
-  if (!hasSessions && !hasPRs) {
-    return (
-      <div className="scroll fi">
-        <div className="empty"><span className="empty-i">📊</span>No data yet.<br />Log sessions and set PRs to see your statistics.</div>
-      </div>
-    );
-  }
+  if (!hasSessions&&!hasPRs) return (
+    <div className="scroll fi"><div className="empty"><span className="empty-i">📊</span>Noch keine Daten.<br />Logge Einheiten und setze PRs um Statistiken zu sehen.</div></div>
+  );
 
   return (
     <div className="scroll fi">
-      {/* Overall rank highlight */}
-      {overallScore > 0 && (
-        <div className="card" style={{ marginBottom:14, background:`linear-gradient(135deg, ${getRank(overallScore).bg}, rgba(0,0,0,0))`, borderColor:getRank(overallScore).color+"30", textAlign:"center" }}>
-          <div style={{ fontFamily:"var(--head)", fontSize:13, letterSpacing:2, color:"var(--muted)", marginBottom:4 }}>OVERALL RANK</div>
-          <div style={{ fontFamily:"var(--head)", fontSize:48, fontWeight:800, color:getRank(overallScore).color, lineHeight:1 }}>{overallScore}</div>
-          <div style={{ fontFamily:"var(--head)", fontSize:18, fontWeight:700, color:getRank(overallScore).color, marginBottom:8 }}>{getRank(overallScore).name}</div>
-          <div style={{ display:"flex", justifyContent:"center", gap:8 }}>
-            <div className="top-pct" style={{ background:`${getRank(overallScore).color}18`, border:`1px solid ${getRank(overallScore).color}44`, color:getRank(overallScore).color }}>
-              Top {scoreToTopPct(overallScore)}% worldwide
-            </div>
+      {overallScore>0&&(
+        <div className="card" style={{marginBottom:14,background:`linear-gradient(135deg,${getRank(overallScore).bg},rgba(0,0,0,0))`,borderColor:getRank(overallScore).color+"30",textAlign:"center"}}>
+          <div style={{fontFamily:"var(--head)",fontSize:13,letterSpacing:2,color:"var(--muted)",marginBottom:4}}>GESAMTRANG</div>
+          <div style={{fontFamily:"var(--head)",fontSize:48,fontWeight:800,color:getRank(overallScore).color,lineHeight:1}}>{overallScore}</div>
+          <div style={{fontFamily:"var(--head)",fontSize:18,fontWeight:700,color:getRank(overallScore).color,marginBottom:8}}>{getRank(overallScore).name}</div>
+          <div style={{display:"flex",justifyContent:"center",gap:8}}>
+            <div className="top-pct" style={{background:`${getRank(overallScore).color}18`,border:`1px solid ${getRank(overallScore).color}44`,color:getRank(overallScore).color}}>Top {scoreToTopPct(overallScore)}% weltweit</div>
           </div>
         </div>
       )}
 
-      {stats && (
+      {stats&&(
         <>
-          {/* Streak */}
           <div className="streak">
             <div className="streak-n">{stats.streak}</div>
             <div>
-              <div style={{ fontFamily:"var(--head)", fontSize:20, fontWeight:700, color:"#fff", marginBottom:2 }}>Day Streak 🔥</div>
-              <div style={{ fontSize:14, color:"var(--text2)" }}>Best ever: {stats.bestStreak} days</div>
+              <div style={{fontFamily:"var(--head)",fontSize:20,fontWeight:700,color:"#fff",marginBottom:2}}>Tage Streak 🔥</div>
+              <div style={{fontSize:14,color:"var(--text2)"}}>Bester: {stats.bestStreak} Tage</div>
             </div>
           </div>
 
-          {/* Key metrics */}
           <div className="sg3">
-            <div className="sbox"><div className="sval">{stats.total}</div><div className="slbl">Sessions</div></div>
-            <div className="sbox"><div className="sval">{stats.avgPerWeek}</div><div className="slbl">Per Week</div></div>
-            <div className="sbox"><div className="sval">{Object.keys(prs).length}</div><div className="slbl">PRs Set</div></div>
+            <div className="sbox"><div className="sval">{stats.total}</div><div className="slbl">Einheiten</div></div>
+            <div className="sbox"><div className="sval">{stats.avgPerWeek}</div><div className="slbl">Pro Woche</div></div>
+            <div className="sbox"><div className="sval">{Object.keys(prs).length}</div><div className="slbl">PRs gesetzt</div></div>
           </div>
 
           <div className="sg2">
             <div className="sbox">
-              <div className="sval" style={{ fontSize:22 }}>{stats.totalVol>=1000?(stats.totalVol/1000).toFixed(1):stats.totalVol}<span className="sunit">{stats.totalVol>=1000?"t":"kg"}</span></div>
-              <div className="slbl">Total Volume</div>
+              <div className="sval" style={{fontSize:22}}>{stats.totalVol>=1000?(stats.totalVol/1000).toFixed(1):stats.totalVol}<span className="sunit">{stats.totalVol>=1000?"t":"kg"}</span></div>
+              <div className="slbl">Gesamtvolumen</div>
             </div>
-            <div className="sbox">
-              <div className="sval" style={{ fontSize:22 }}>{stats.consistency}<span className="sunit">%</span></div>
-              <div className="slbl">Consistency</div>
-            </div>
-          </div>
-
-          <div className="sg2">
-            <div className="sbox">
-              <div className="sval" style={{ fontSize:22 }}>{stats.avgVol>=1000?(stats.avgVol/1000).toFixed(1):stats.avgVol}<span className="sunit">{stats.avgVol>=1000?"t":"kg"}</span></div>
-              <div className="slbl">Avg Vol/Session</div>
-            </div>
-            <div className="sbox">
-              <div className="sval" style={{ fontSize:22 }}>{Math.round(stats.totalSets/stats.total)}</div>
-              <div className="slbl">Avg Sets/Session</div>
+            <div className="sbox" style={{borderColor:"rgba(244,63,94,.2)"}}>
+              <div className="sval" style={{fontSize:22}}>{stats.totalCals>=1000?(stats.totalCals/1000).toFixed(1):stats.totalCals}<span className="sunit">{stats.totalCals>=1000?"Mkcal":"kcal"}</span></div>
+              <div className="slbl">Kcal verbrannt ca.</div>
             </div>
           </div>
 
-          {/* Sessions per month bar chart */}
-          <Lbl>Sessions per Month</Lbl>
+          <Lbl>Einheiten pro Monat</Lbl>
           <div className="card">
-            <div className="vchart" style={{ height:90 }}>
-              {stats.months.map(m => {
-                const max = Math.max(...stats.months.map(x=>x.count), 1);
+            <div className="vchart" style={{height:90}}>
+              {stats.months.map(m=>{
+                const max=Math.max(...stats.months.map(x=>x.count),1);
                 return (
                   <div key={m.key} className="vbw">
-                    <div className="vb" style={{ height:`${(m.count/max)*74}px`, background:m.count>0?"linear-gradient(180deg,var(--acc),rgba(56,189,248,.3))":"var(--bdr)" }} />
+                    <div className="vb" style={{height:`${(m.count/max)*74}px`,background:m.count>0?"linear-gradient(180deg,var(--acc),rgba(56,189,248,.3))":"var(--bdr)"}} />
                     <div className="vl">{m.lbl}</div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontSize:12, color:"var(--muted)", marginTop:10, textAlign:"center" }}>
-              {stats.avgPerWeek} sessions/week · {stats.totalSets} total sets · {stats.daysSince} days active
-            </div>
           </div>
 
-          {/* Volume per month */}
-          <Lbl>Monthly Volume (kg)</Lbl>
+          <Lbl>Monatliches Volumen (kg)</Lbl>
           <div className="card">
-            <div className="vchart" style={{ height:90 }}>
-              {stats.volByMonth.map(m => {
-                const max = Math.max(...stats.volByMonth.map(x=>x.vol), 1);
+            <div className="vchart" style={{height:90}}>
+              {stats.volByMonth.map(m=>{
+                const max=Math.max(...stats.volByMonth.map(x=>x.vol),1);
                 return (
                   <div key={m.key} className="vbw">
-                    <div className="vb" style={{ height:`${(m.vol/max)*74}px`, background:m.vol>0?"linear-gradient(180deg,var(--grn),rgba(52,211,153,.3))":"var(--bdr)" }} />
+                    <div className="vb" style={{height:`${(m.vol/max)*74}px`,background:m.vol>0?"linear-gradient(180deg,var(--grn),rgba(52,211,153,.3))":"var(--bdr)"}} />
                     <div className="vl">{m.lbl}</div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontSize:12, color:"var(--muted)", marginTop:10, textAlign:"center" }}>
-              Peak month: {Math.max(...stats.volByMonth.map(m=>m.vol)).toLocaleString()} kg
-            </div>
           </div>
 
-          {/* Volume by muscle */}
-          {stats.topMuscles.length > 0 && (
+          {stats.topMuscles.length>0&&(
             <>
-              <Lbl>Volume by Muscle Group</Lbl>
+              <Lbl>Volumen nach Muskelgruppe</Lbl>
               <div className="clist">
-                {stats.topMuscles.map(([muscle,vol],i) => {
-                  const max=stats.topMuscles[0][1]; const c=COLORS[i]||"var(--muted)";
+                {stats.topMuscles.map(([muscle,vol],i)=>{
+                  const max=stats.topMuscles[0][1],c=COLORS[i]||"var(--muted)";
                   return (
                     <div key={muscle} className="row">
-                      <div style={{ width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13 }}>{i+1}</div>
-                      <div style={{ flex:1,marginLeft:10 }}>
-                        <div style={{ fontWeight:600,marginBottom:4 }}>{muscle}</div>
-                        <div style={{ height:4,background:"var(--bdr)",borderRadius:2,overflow:"hidden" }}>
-                          <div style={{ height:"100%",width:`${(vol/max)*100}%`,background:c,borderRadius:2 }} />
-                        </div>
+                      <div style={{width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13}}>{i+1}</div>
+                      <div style={{flex:1,marginLeft:10}}>
+                        <div style={{fontWeight:600,marginBottom:4}}>{muscle}</div>
+                        <div style={{height:4,background:"var(--bdr)",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",width:`${(vol/max)*100}%`,background:c,borderRadius:2}} /></div>
                       </div>
-                      <div style={{ fontFamily:"var(--head)",fontWeight:700,fontSize:15,color:c,marginLeft:10 }}>
-                        {vol>=1000?(vol/1000).toFixed(1)+"t":vol+" kg"}
-                      </div>
+                      <div style={{fontFamily:"var(--head)",fontWeight:700,fontSize:15,color:c,marginLeft:10}}>{vol>=1000?(vol/1000).toFixed(1)+"t":vol+" kg"}</div>
                     </div>
                   );
                 })}
@@ -1317,18 +1356,17 @@ function StatsTab({ sessions, prs }) {
             </>
           )}
 
-          {/* Top exercises */}
-          {stats.topEx.length > 0 && (
+          {stats.topEx.length>0&&(
             <>
-              <Lbl>Most Trained Exercises</Lbl>
+              <Lbl>Meisttrainierte Übungen</Lbl>
               <div className="clist">
-                {stats.topEx.map(([name,count],i) => (
+                {stats.topEx.map(([name,count],i)=>(
                   <div key={name} className="row">
-                    <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                      <div style={{ width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13 }}>{i+1}</div>
-                      <div style={{ fontWeight:600 }}>{name}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13}}>{i+1}</div>
+                      <div style={{fontWeight:600}}>{name}</div>
                     </div>
-                    <div style={{ fontFamily:"var(--head)",fontWeight:700,fontSize:14,color:"var(--acc)" }}>{count}× logged</div>
+                    <div style={{fontFamily:"var(--head)",fontWeight:700,fontSize:14,color:"var(--acc)"}}>{count}× eingetragen</div>
                   </div>
                 ))}
               </div>
@@ -1337,57 +1375,88 @@ function StatsTab({ sessions, prs }) {
         </>
       )}
 
+      {/* Körpergewicht Liniendiagramm */}
+      {bodyWeightLog&&bodyWeightLog.length>=2&&(
+        <>
+          <Lbl>Körpergewicht Verlauf</Lbl>
+          <div className="card">
+            {(()=>{
+              const sorted=[...bodyWeightLog].sort((a,b)=>a.date.localeCompare(b.date)).slice(-20);
+              const min=Math.min(...sorted.map(x=>x.weight))-2;
+              const max=Math.max(...sorted.map(x=>x.weight))+2;
+              const range=max-min||1;
+              const w=100/sorted.length;
+              return (
+                <div>
+                  <svg viewBox={`0 0 100 50`} style={{width:"100%",height:80,overflow:"visible"}}>
+                    <polyline
+                      fill="none"
+                      stroke="var(--acc)"
+                      strokeWidth="1.5"
+                      points={sorted.map((p,i)=>`${i*w+w/2},${50-(p.weight-min)/range*44}`).join(" ")}
+                    />
+                    {sorted.map((p,i)=>(
+                      <circle key={i} cx={i*w+w/2} cy={50-(p.weight-min)/range*44} r="2" fill="var(--acc)" />
+                    ))}
+                  </svg>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--muted)",marginTop:4}}>
+                    <span>{fmtShort(sorted[0].date)}</span>
+                    <span style={{color:"var(--acc)",fontFamily:"var(--head)",fontWeight:700}}>
+                      {sorted[sorted.length-1].weight} kg
+                    </span>
+                    <span>{fmtShort(sorted[sorted.length-1].date)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </>
+      )}
+
       {/* Muscle Balance */}
-      <Lbl>Muscle Balance</Lbl>
+      <Lbl>Muskelbalance</Lbl>
       <div className="card">
-        {muscleBalance.map(({muscle,score,prCount,total}) => {
-          const r = getRank(score);
+        {muscleBalance.map(({muscle,score,prCount,total})=>{
+          const r=getRank(score);
           return (
             <div key={muscle} className="balance-item">
               <div className="balance-label">{muscle}</div>
-              <div className="balance-track" style={{ flex:1 }}>
-                <div className="balance-fill" style={{ width:`${score}%`, background:r.color, boxShadow:`0 0 4px ${r.color}44` }} />
-              </div>
-              <div style={{ fontFamily:"var(--head)", fontSize:13, fontWeight:700, color:r.color, minWidth:30, textAlign:"right" }}>{score}</div>
-              <div style={{ fontSize:11, color:"var(--muted)", minWidth:36, textAlign:"right" }}>{prCount}/{total}</div>
+              <div className="balance-track" style={{flex:1}}><div className="balance-fill" style={{width:`${score}%`,background:r.color,boxShadow:`0 0 4px ${r.color}44`}} /></div>
+              <div style={{fontFamily:"var(--head)",fontSize:13,fontWeight:700,color:r.color,minWidth:30,textAlign:"right"}}>{score}</div>
+              <div style={{fontSize:11,color:"var(--muted)",minWidth:36,textAlign:"right"}}>{prCount}/{total}</div>
             </div>
           );
         })}
-        <div style={{ fontSize:12,color:"var(--text2)",marginTop:10,borderTop:"1px solid var(--bdr)",paddingTop:10 }}>
-          {(() => {
-            const scores = muscleBalance.filter(m=>m.score>0).map(m=>m.score);
-            if (scores.length < 2) return "Log more PRs across all muscle groups to see your balance.";
-            const avg = scores.reduce((s,x)=>s+x,0)/scores.length;
-            const max = Math.max(...scores), min = Math.min(...scores);
-            const diff = max - min;
-            if (diff < 20) return "✅ Your muscle development is well-balanced! Keep it up.";
-            if (diff < 40) return "⚠️ Slight imbalance detected. Focus on your weaker muscle groups.";
-            return "🔴 Significant imbalance. Prioritize your underdeveloped muscles to prevent injury.";
+        <div style={{fontSize:12,color:"var(--text2)",marginTop:10,borderTop:"1px solid var(--bdr)",paddingTop:10}}>
+          {(()=>{
+            const scores=muscleBalance.filter(m=>m.score>0).map(m=>m.score);
+            if(scores.length<2) return "Trage mehr PRs für alle Muskelgruppen ein um deine Balance zu sehen.";
+            const max=Math.max(...scores),min=Math.min(...scores),diff=max-min;
+            if(diff<20) return "✅ Deine Muskelentwicklung ist gut ausgewogen! Weiter so.";
+            if(diff<40) return "⚠️ Leichte Imbalance. Konzentriere dich auf schwächere Muskelgruppen.";
+            return "🔴 Deutliche Imbalance. Priorisiere unterentwickelte Muskeln um Verletzungen vorzubeugen.";
           })()}
         </div>
       </div>
 
-      {/* Top PRs */}
-      {topPRs.length > 0 && (
+      {topPRs.length>0&&(
         <>
-          <Lbl>Top PRs by Score</Lbl>
+          <Lbl>Top PRs nach Score</Lbl>
           <div className="clist">
-            {topPRs.map((ex,i) => {
+            {topPRs.map((ex,i)=>{
               const r=getRank(ex.score);
               return (
                 <div key={ex.id} className="row">
-                  <div style={{ width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13 }}>{i+1}</div>
-                  <div style={{ flex:1,marginLeft:10 }}>
-                    <div style={{ fontWeight:600 }}>{ex.name}</div>
-                    <div style={{ fontSize:12,color:"var(--muted)" }}>{ex.muscle} · {fmtDate(ex.pr.date)}</div>
+                  <div style={{width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13}}>{i+1}</div>
+                  <div style={{flex:1,marginLeft:10}}>
+                    <div style={{fontWeight:600}}>{ex.name}</div>
+                    <div style={{fontSize:12,color:"var(--muted)"}}>{ex.muscle} · {fmtDate(ex.pr.date)}</div>
                   </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:"var(--head)",fontWeight:700,color:r.color,fontSize:16 }}>
-                      {ex.isReps ? ex.pr.reps+" reps" : ex.pr.weight+" kg × "+ex.pr.reps}
-                    </div>
-                    <div style={{ display:"flex",gap:6,justifyContent:"flex-end",marginTop:2 }}>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontFamily:"var(--head)",fontWeight:700,color:r.color,fontSize:16}}>{ex.isReps?ex.pr.reps+" Wdh.":ex.pr.weight+" kg × "+ex.pr.reps}</div>
+                    <div style={{display:"flex",gap:6,justifyContent:"flex-end",marginTop:2}}>
                       <Badge score={ex.score} />
-                      <span style={{ fontSize:11,color:"var(--muted)",alignSelf:"center" }}>Top {scoreToTopPct(ex.score)}%</span>
+                      <span style={{fontSize:11,color:"var(--muted)",alignSelf:"center"}}>Top {scoreToTopPct(ex.score)}%</span>
                     </div>
                   </div>
                 </div>
@@ -1401,72 +1470,50 @@ function StatsTab({ sessions, prs }) {
 }
 
 /* ═══════════════════════════════════════════════════════════  ACHIEVEMENTS TAB  */
-function AchievementsTab({ prs, sessions }) {
-  const overall = useMemo(() => {
-    const scores = MUSCLES.map(m => getMuscleScore(m, prs)).filter(s => s > 0);
-    return scores.length ? Math.round(scores.reduce((s,x) => s+x, 0) / scores.length) : 0;
-  }, [prs]);
-
-  const results = useMemo(() =>
-    ACHIEVEMENTS.map(a => ({ ...a, done: a.check(prs, sessions, overall) }))
-  , [prs, sessions, overall]);
-
-  const doneCount = results.filter(a => a.done).length;
-  const pct = Math.round((doneCount / ACHIEVEMENTS.length) * 100);
-
-  const fact = useMemo(() => FUN_FACTS[Math.floor(Date.now()/86400000) % FUN_FACTS.length], []);
+function AchievementsTab({ prs, sessions, customExercises, goals }) {
+  const overall=useMemo(()=>{const scores=MUSCLES.map(m=>getMuscleScore(m,prs)).filter(s=>s>0);return scores.length?Math.round(scores.reduce((s,x)=>s+x,0)/scores.length):0;},[prs]);
+  const results=useMemo(()=>ACHIEVEMENTS.map(a=>({...a,done:a.check(prs,sessions,overall,customExercises,goals)})),[prs,sessions,overall,customExercises,goals]);
+  const doneCount=results.filter(a=>a.done).length;
+  const pct=Math.round((doneCount/ACHIEVEMENTS.length)*100);
+  const fact=useMemo(()=>FUN_FACTS[Math.floor(Date.now()/86400000)%FUN_FACTS.length],[]);
 
   return (
     <div className="scroll fi">
-      {/* Header */}
-      <div className="card" style={{ marginBottom:14, background:"linear-gradient(135deg,rgba(251,191,36,.08),rgba(0,0,0,0))", borderColor:"rgba(251,191,36,.25)", textAlign:"center" }}>
-        <div style={{ fontFamily:"var(--head)", fontSize:40, lineHeight:1, marginBottom:8 }}>🏆</div>
-        <div className="h2" style={{ marginBottom:4 }}>Achievements</div>
-        <div style={{ fontSize:14, color:"var(--text2)", marginBottom:12 }}>
-          {doneCount} of {ACHIEVEMENTS.length} unlocked
-        </div>
-        <div className="bar-t" style={{ height:8 }}>
-          <div className="bar-f" style={{ width:`${pct}%`, background:"var(--gld)", boxShadow:"0 0 8px rgba(251,191,36,.5)" }} />
-        </div>
-        <div style={{ fontSize:12, color:"var(--muted)", marginTop:6 }}>{pct}% complete</div>
+      <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,rgba(251,191,36,.08),rgba(0,0,0,0))",borderColor:"rgba(251,191,36,.25)",textAlign:"center"}}>
+        <div style={{fontFamily:"var(--head)",fontSize:40,lineHeight:1,marginBottom:8}}>🏆</div>
+        <div className="h2" style={{marginBottom:4}}>Achievements</div>
+        <div style={{fontSize:14,color:"var(--text2)",marginBottom:12}}>{doneCount} von {ACHIEVEMENTS.length} freigeschaltet</div>
+        <div className="bar-t" style={{height:8}}><div className="bar-f" style={{width:`${pct}%`,background:"var(--gld)",boxShadow:"0 0 8px rgba(251,191,36,.5)"}} /></div>
+        <div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>{pct}% abgeschlossen</div>
       </div>
 
-      {/* Done */}
-      {results.filter(a => a.done).length > 0 && (
+      {results.filter(a=>a.done).length>0&&(
         <>
-          <Lbl>Unlocked ({doneCount})</Lbl>
-          {results.filter(a => a.done).map(a => (
+          <Lbl>Freigeschaltet ({doneCount})</Lbl>
+          {results.filter(a=>a.done).map(a=>(
             <div key={a.id} className="ach done">
               <div className="ach-icon">{a.icon}</div>
-              <div style={{ flex:1 }}>
-                <div className="ach-title">{a.title}</div>
-                <div className="ach-desc">{a.desc}</div>
-              </div>
+              <div style={{flex:1}}><div className="ach-title">{a.title}</div><div className="ach-desc">{a.desc}</div></div>
               <div className="ach-done-badge">✓ DONE</div>
             </div>
           ))}
         </>
       )}
 
-      {/* Locked */}
-      {results.filter(a => !a.done).length > 0 && (
+      {results.filter(a=>!a.done).length>0&&(
         <>
-          <Lbl>Locked ({ACHIEVEMENTS.length - doneCount})</Lbl>
-          {results.filter(a => !a.done).map(a => (
+          <Lbl>Gesperrt ({ACHIEVEMENTS.length-doneCount})</Lbl>
+          {results.filter(a=>!a.done).map(a=>(
             <div key={a.id} className="ach locked">
               <div className="ach-icon">🔒</div>
-              <div style={{ flex:1 }}>
-                <div className="ach-title">{a.title}</div>
-                <div className="ach-desc">{a.desc}</div>
-              </div>
+              <div style={{flex:1}}><div className="ach-title">{a.title}</div><div className="ach-desc">{a.desc}</div></div>
             </div>
           ))}
         </>
       )}
 
-      {/* Fun fact at bottom */}
-      <Lbl>Did You Know?</Lbl>
-      <div className="fact" style={{ marginBottom:0 }}>
+      <Lbl>Wusstest du?</Lbl>
+      <div className="fact" style={{marginBottom:0}}>
         <span className="fact-i">{fact.icon}</span>
         <span className="fact-t">{fact.text}</span>
       </div>
@@ -1474,114 +1521,469 @@ function AchievementsTab({ prs, sessions }) {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════  PROFILE TAB  */
+function ProfileTab({ userProfile, setUserProfile, goals, setGoals, bodyWeightLog, setBodyWeightLog, prs }) {
+  const [weightInput, setWeightInput] = useState(userProfile?.weight?String(userProfile.weight):"");
+  const [heightInput, setHeightInput] = useState(userProfile?.height?String(userProfile.height):"");
+  const [goalInput,   setGoalInput]   = useState(userProfile?.trainingGoal||"hypertrophy");
+  const [targetReps,  setTargetReps]  = useState(userProfile?.targetReps?String(userProfile.targetReps):"8");
+  const [targetSets,  setTargetSets]  = useState(userProfile?.targetSets?String(userProfile.targetSets):"4");
+  const [saved,       setSaved]       = useState(false);
+
+  // Dream goal form
+  const [gExId,  setGExId]  = useState(ALL_EX[0].id);
+  const [gTarget,setGTarget]= useState("");
+  const [gDate,  setGDate]  = useState("");
+  const [showAddGoal, setShowAddGoal] = useState(false);
+
+  // Body weight log
+  const [bwInput, setBwInput] = useState("");
+
+  const saveProfile = () => {
+    const p={
+      weight:Number(weightInput)||0,
+      height:Number(heightInput)||0,
+      trainingGoal:goalInput,
+      targetReps:Number(targetReps)||8,
+      targetSets:Number(targetSets)||4,
+    };
+    setUserProfile(p);
+    setSaved(true);
+    setTimeout(()=>setSaved(false),2000);
+  };
+
+  const addGoal = () => {
+    if (!gTarget||!gDate) return;
+    const ex=ALL_EX.find(x=>x.id===gExId);
+    if (!ex) return;
+    const newGoal={
+      id:Date.now(),
+      exId:gExId,
+      exName:ex.name,
+      isReps:!!ex.isReps,
+      targetWeight:Number(gTarget)||0,
+      targetReps:Number(gTarget)||0,
+      targetDate:gDate,
+    };
+    setGoals(prev=>[...prev,newGoal]);
+    setGTarget("");setGDate("");setShowAddGoal(false);
+  };
+
+  const removeGoal = id => setGoals(prev=>prev.filter(g=>g.id!==id));
+
+  const addBodyWeight = () => {
+    const w=Number(bwInput);
+    if (!w||w<20||w>300) return;
+    setBodyWeightLog(prev=>{
+      const today=todayISO();
+      const filtered=prev.filter(x=>x.date!==today);
+      return [...filtered,{date:today,weight:w}].sort((a,b)=>a.date.localeCompare(b.date));
+    });
+    setBwInput("");
+  };
+
+  // Goal progress calculator
+  const calcGoalProgress = (goal) => {
+    const ex=ALL_EX.find(x=>x.id===goal.exId);
+    if (!ex) return null;
+    const pr=prs[goal.exId];
+    const currentVal = pr?(ex.isReps?pr.reps:epley1RM(pr.weight,pr.reps)):0;
+    const targetVal  = goal.isReps?goal.targetReps:goal.targetWeight;
+    if (!targetVal) return null;
+    const pct=Math.min(100,Math.round((currentVal/targetVal)*100));
+    const daysLeft=Math.ceil((new Date(goal.targetDate)-new Date())/86400000);
+
+    // Rate of improvement estimate
+    const hist = Object.entries(prs).filter(([id])=>id===goal.exId);
+    // Simple: if we know current and we have progress, extrapolate
+    // Days until goal at current rate
+    let eta = null;
+    if (pct>0&&pct<100) {
+      const needed = targetVal-currentVal;
+      // We estimate ~1-2% improvement per week as default
+      const weeklyGain = currentVal*0.015;
+      const weeksNeeded = Math.ceil(needed/weeklyGain);
+      const etaDate = new Date();
+      etaDate.setDate(etaDate.getDate()+weeksNeeded*7);
+      eta = etaDate.toISOString().slice(0,10);
+    }
+
+    return {pct, currentVal:Math.round(currentVal), targetVal, daysLeft, eta, onTrack: eta?new Date(eta)<=new Date(goal.targetDate):false};
+  };
+
+  const GOAL_LABELS = {
+    strength:     "Maximalkraft",
+    hypertrophy:  "Muskelaufbau",
+    endurance:    "Ausdauer",
+    weight_loss:  "Abnehmen",
+    maintenance:  "Halten",
+  };
+
+  const getGoalTip = (goal) => {
+    const tips = {
+      strength: { reps:"1–5 Wiederholungen", sets:"3–5 Sätze", rest:"3–5 Min. Pause", intensity:"85–100% 1RM" },
+      hypertrophy: { reps:"6–12 Wiederholungen", sets:"3–5 Sätze", rest:"60–90 Sek. Pause", intensity:"65–85% 1RM" },
+      endurance: { reps:"12–20+ Wiederholungen", sets:"2–4 Sätze", rest:"30–60 Sek. Pause", intensity:"50–65% 1RM" },
+      weight_loss: { reps:"12–15 Wiederholungen", sets:"3–4 Sätze", rest:"30–60 Sek. Pause", intensity:"Superset-Training empfohlen" },
+      maintenance: { reps:"8–12 Wiederholungen", sets:"2–3 Sätze", rest:"60–90 Sek. Pause", intensity:"Moderate Intensität" },
+    };
+    return tips[goal]||tips.hypertrophy;
+  };
+
+  const tip = getGoalTip(goalInput);
+  const bmi = userProfile?.weight&&userProfile?.height ? (userProfile.weight/((userProfile.height/100)**2)).toFixed(1) : null;
+
+  return (
+    <div className="scroll fi">
+      <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,rgba(168,85,247,.08),rgba(0,0,0,0))",borderColor:"rgba(168,85,247,.25)"}}>
+        <div className="h2" style={{marginBottom:4}}>👤 Profil</div>
+        <div style={{fontSize:14,color:"var(--text2)"}}>Deine Körperdaten für genauere Berechnungen.</div>
+      </div>
+
+      {/* Body stats */}
+      <Lbl>Körperdaten</Lbl>
+      <div className="card">
+        <div className="fr2" style={{marginBottom:12}}>
+          <div className="fg">
+            <label className="flbl">Körpergewicht (kg)</label>
+            <input className="finp" type="number" inputMode="decimal" value={weightInput} onChange={e=>setWeightInput(e.target.value)} placeholder="z.B. 80" />
+          </div>
+          <div className="fg">
+            <label className="flbl">Größe (cm)</label>
+            <input className="finp" type="number" inputMode="numeric" value={heightInput} onChange={e=>setHeightInput(e.target.value)} placeholder="z.B. 180" />
+          </div>
+        </div>
+
+        {bmi&&(
+          <div style={{fontSize:13,color:"var(--text2)",marginBottom:12,background:"var(--bg2)",borderRadius:8,padding:"8px 12px"}}>
+            BMI: <strong style={{color:"var(--acc)"}}>{bmi}</strong>
+            {" · "}
+            {Number(bmi)<18.5?"Untergewicht":Number(bmi)<25?"Normalgewicht":Number(bmi)<30?"Übergewicht":"Adipositas"}
+          </div>
+        )}
+
+        <div className="fg">
+          <label className="flbl">Trainingsziel</label>
+          <select className="fsel" value={goalInput} onChange={e=>setGoalInput(e.target.value)}>
+            <option value="strength">💪 Maximalkraft</option>
+            <option value="hypertrophy">📈 Muskelaufbau</option>
+            <option value="endurance">🏃 Ausdauer</option>
+            <option value="weight_loss">🔥 Abnehmen</option>
+            <option value="maintenance">⚖️ Halten</option>
+          </select>
+        </div>
+
+        <div className="fr2" style={{marginBottom:12}}>
+          <div className="fg">
+            <label className="flbl">Ziel-Wdh. (Hypertrophie)</label>
+            <input className="finp" type="number" inputMode="numeric" value={targetReps} onChange={e=>setTargetReps(e.target.value)} placeholder="8" />
+          </div>
+          <div className="fg">
+            <label className="flbl">Ziel-Sätze</label>
+            <input className="finp" type="number" inputMode="numeric" value={targetSets} onChange={e=>setTargetSets(e.target.value)} placeholder="4" />
+          </div>
+        </div>
+
+        <button className="btn" onClick={saveProfile} style={{background:saved?"var(--grn)":"var(--acc)"}}>
+          {saved?"✓ Gespeichert!":"Profil speichern"}
+        </button>
+      </div>
+
+      {/* Training goal tips */}
+      {goalInput&&(
+        <>
+          <Lbl>Empfehlungen für {GOAL_LABELS[goalInput]}</Lbl>
+          <div className="card" style={{borderColor:"rgba(56,189,248,.2)"}}>
+            <div style={{fontSize:12,color:"var(--muted)",marginBottom:10}}>💡 Unverbindliche Hinweise – trainiere so wie es für dich passt.</div>
+            {Object.entries(tip).map(([k,v])=>(
+              <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--bdr)",fontSize:14}}>
+                <span style={{color:"var(--text2)",textTransform:"capitalize"}}>{k==="reps"?"Wdh.":k==="sets"?"Sätze":k==="rest"?"Pause":"Intensität"}</span>
+                <span style={{color:"var(--acc)",fontWeight:600}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Body weight log */}
+      <Lbl>Gewichtslog</Lbl>
+      <div className="card">
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          <input className="finp" type="number" inputMode="decimal" value={bwInput} onChange={e=>setBwInput(e.target.value)} placeholder="Heutiges Gewicht (kg)" style={{flex:1}} />
+          <button className="btn-add" onClick={addBodyWeight}>Eintragen</button>
+        </div>
+        {bodyWeightLog.length>0?(
+          <div style={{maxHeight:200,overflowY:"auto"}}>
+            {[...bodyWeightLog].reverse().slice(0,15).map((entry,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--bdr)",fontSize:13}}>
+                <span style={{color:"var(--text2)"}}>{fmtDate(entry.date)}</span>
+                <span style={{color:"var(--acc)",fontFamily:"var(--head)",fontWeight:700}}>{entry.weight} kg</span>
+              </div>
+            ))}
+          </div>
+        ):(
+          <div style={{fontSize:13,color:"var(--muted)",textAlign:"center",padding:"10px 0"}}>Noch keine Gewichtseinträge.</div>
+        )}
+      </div>
+
+      {/* Dream goals */}
+      <Lbl>Traumziele 🎯</Lbl>
+
+      {goals.map(goal=>{
+        const progress=calcGoalProgress(goal);
+        const ex=ALL_EX.find(x=>x.id===goal.exId);
+        const daysLeft=Math.ceil((new Date(goal.targetDate)-new Date())/86400000);
+        return (
+          <div key={goal.id} className="goal-card">
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:16,color:"#fff"}}>{goal.exName}</div>
+                <div style={{fontSize:13,color:"var(--text2)",marginTop:2}}>
+                  Ziel: <strong style={{color:"var(--gld)"}}>{goal.isReps?goal.targetReps+" Wdh.":goal.targetWeight+" kg"}</strong>
+                  {" bis "}{fmtDate(goal.targetDate)}
+                </div>
+              </div>
+              <button className="btn-d" style={{padding:"4px 8px",fontSize:11}} onClick={()=>removeGoal(goal.id)}>✕</button>
+            </div>
+
+            {progress&&(
+              <>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--muted)",marginBottom:4}}>
+                  <span>Aktuell: {progress.currentVal}{goal.isReps?" Wdh.":" kg est. 1RM"}</span>
+                  <span style={{color:progress.pct>=100?"var(--grn)":progress.onTrack?"var(--acc)":"var(--gld)"}}>{progress.pct}%</span>
+                </div>
+                <div className="goal-progress">
+                  <div className="goal-fill" style={{width:`${progress.pct}%`,background:progress.pct>=100?"var(--grn)":progress.onTrack?"var(--acc)":"var(--gld)"}} />
+                </div>
+                {progress.pct>=100?(
+                  <div className="tip-pill">🏆 Ziel erreicht!</div>
+                ):(
+                  <div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>
+                    {daysLeft>0?(
+                      <>
+                        {daysLeft} Tage bis Deadline
+                        {progress.eta&&(
+                          <> · Voraussichtlich {fmtDate(progress.eta)}{" "}
+                          <span style={{color:progress.onTrack?"var(--grn)":"var(--gld)"}}>
+                            {progress.onTrack?"✓ auf Kurs":"→ danach"}
+                          </span></>
+                        )}
+                      </>
+                    ):"⚠️ Deadline überschritten"}
+                  </div>
+                )}
+                {progress.pct<100&&progress.pct>0&&(
+                  <div className="tip-pill" style={{marginLeft:0}}>
+                    💡 ~1,5% Steigerung/Woche ist realistisch
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+
+      {!showAddGoal?(
+        <button className="btn-add" style={{width:"100%",marginBottom:10}} onClick={()=>setShowAddGoal(true)}>+ Traumziel hinzufügen</button>
+      ):(
+        <div className="card" style={{borderColor:"rgba(251,191,36,.25)"}}>
+          <div style={{fontFamily:"var(--head)",fontSize:13,letterSpacing:1.5,color:"var(--gld)",marginBottom:12}}>NEUES TRAUMZIEL</div>
+          <div className="fg">
+            <label className="flbl">Übung</label>
+            <select className="fsel" value={gExId} onChange={e=>setGExId(e.target.value)}>
+              {MUSCLES.map(m=>(
+                <optgroup key={m} label={m}>
+                  {EX[m].map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <div className="fr2" style={{marginBottom:12}}>
+            <div className="fg">
+              <label className="flbl">{ALL_EX.find(x=>x.id===gExId)?.isReps?"Ziel-Wdh.":"Zielgewicht (kg est.1RM)"}</label>
+              <input className="finp" type="number" inputMode="decimal" value={gTarget} onChange={e=>setGTarget(e.target.value)} placeholder="z.B. 100" />
+            </div>
+            <div className="fg">
+              <label className="flbl">Bis Datum</label>
+              <input className="finp" type="date" value={gDate} onChange={e=>setGDate(e.target.value)} />
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button className="btn" style={{flex:1}} onClick={addGoal}>Ziel setzen</button>
+            <button className="btn-g" onClick={()=>setShowAddGoal(false)}>Abbrechen</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════  CUSTOM EXERCISES  */
+function CustomExModal({ onAdd, onClose }) {
+  const [name,   setName]   = useState("");
+  const [muscle, setMuscle] = useState("Chest");
+  const [isReps, setIsReps] = useState(false);
+  const [note,   setNote]   = useState("");
+
+  const add = () => {
+    if (!name.trim()) return;
+    const id = "custom_"+Date.now();
+    onAdd({ id, name:name.trim(), muscle, isReps, isCustom:true, note, s:{beg:0,nov:0,int:0,adv:0,pro:0,eli:0} });
+    onClose();
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(0,0,0,.8)",backdropFilter:"blur(4px)",display:"flex",alignItems:"flex-end",justifyContent:"center",padding:16}}>
+      <div style={{background:"var(--surf)",border:"1px solid var(--bdr)",borderRadius:"20px 20px 12px 12px",padding:"24px 20px",width:"100%",maxWidth:480,animation:"popIn .3s ease"}}>
+        <div style={{fontFamily:"var(--head)",fontSize:20,fontWeight:800,color:"#fff",marginBottom:16}}>Eigene Übung hinzufügen</div>
+        <div className="fg">
+          <label className="flbl">Übungsname</label>
+          <input className="finp" value={name} onChange={e=>setName(e.target.value)} placeholder="z.B. Kabelzug Außenrotation" />
+        </div>
+        <div className="fg">
+          <label className="flbl">Muskelgruppe</label>
+          <select className="fsel" value={muscle} onChange={e=>setMuscle(e.target.value)}>
+            {MUSCLES.map(m=><option key={m} value={m}>{m}</option>)}
+            <option value="Custom">Sonstige</option>
+          </select>
+        </div>
+        <div className="fg">
+          <label className="flbl">Typ</label>
+          <select className="fsel" value={isReps?"reps":"weight"} onChange={e=>setIsReps(e.target.value==="reps")}>
+            <option value="weight">Gewicht + Wiederholungen</option>
+            <option value="reps">Nur Wiederholungen (Körpergewicht)</option>
+          </select>
+        </div>
+        <div className="fg">
+          <label className="flbl">Notiz (optional)</label>
+          <input className="finp" value={note} onChange={e=>setNote(e.target.value)} placeholder="Ausführungshinweis..." />
+        </div>
+        <div style={{fontSize:12,color:"var(--muted)",marginBottom:16,background:"var(--bg2)",borderRadius:8,padding:"8px 12px"}}>
+          ℹ️ Eigene Übungen können nicht bewertet/gerankt werden, da keine Referenzwerte vorhanden sind.
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button className="btn" style={{flex:1}} onClick={add}>Hinzufügen</button>
+          <button className="btn-g" onClick={onClose}>Abbrechen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════  ROOT  */
 const TABS = [
-  { id:"dashboard",    label:"Home"    },
-  { id:"prs",          label:"PRs"     },
-  { id:"log",          label:"Log"     },
-  { id:"stats",        label:"Stats"   },
-  { id:"achievements", label:"Awards"  },
+  { id:"dashboard",    label:"Home",    icon:"🏠" },
+  { id:"prs",          label:"PRs",     icon:"⭐" },
+  { id:"log",          label:"Log",     icon:"📋" },
+  { id:"stats",        label:"Stats",   icon:"📊" },
+  { id:"achievements", label:"Awards",  icon:"🏆" },
+  { id:"profile",      label:"Profil",  icon:"👤" },
 ];
 
 function IronRank() {
   const [tab, setTab] = useState("dashboard");
 
-  // ── Persistent state via localStorage ──────────────────────────────
-  const load = (key, fallback) => {
-    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
-    catch { return fallback; }
-  };
-  const [prs,       setPrsRaw]       = useState(() => load("ir_prs", {}));
-  const [sessions,  setSessionsRaw]  = useState(() => load("ir_sessions", []));
-  const [prHistory, setPRHistoryRaw] = useState(() => load("ir_prHistory", {}));
+  const load = (key,fallback) => { try{const v=localStorage.getItem(key);return v?JSON.parse(v):fallback;}catch{return fallback;} };
 
-  const setPrs = v => {
-    const next = typeof v === "function" ? v(prs) : v;
-    setPrsRaw(next);
-    try { localStorage.setItem("ir_prs", JSON.stringify(next)); } catch {}
-  };
-  const setSessions = v => {
-    const next = typeof v === "function" ? v(sessions) : v;
-    setSessionsRaw(next);
-    try { localStorage.setItem("ir_sessions", JSON.stringify(next)); } catch {}
-  };
-  const setPRHistory = v => {
-    const next = typeof v === "function" ? v(prHistory) : v;
-    setPRHistoryRaw(next);
-    try { localStorage.setItem("ir_prHistory", JSON.stringify(next)); } catch {}
-  };
-  // ───────────────────────────────────────────────────────────────────
+  const [prs,              setPrsRaw]             = useState(()=>load("ir_prs",{}));
+  const [sessions,         setSessionsRaw]         = useState(()=>load("ir_sessions",[]));
+  const [prHistory,        setPRHistoryRaw]        = useState(()=>load("ir_prHistory",{}));
+  const [userProfile,      setUserProfileRaw]      = useState(()=>load("ir_profile",{}));
+  const [goals,            setGoalsRaw]            = useState(()=>load("ir_goals",[]));
+  const [bodyWeightLog,    setBodyWeightLogRaw]    = useState(()=>load("ir_bwlog",[]));
+  const [customExercises,  setCustomExercisesRaw]  = useState(()=>load("ir_custom_ex",[]));
+  const [showAddCustom,    setShowAddCustom]       = useState(false);
 
-  // Track PR history whenever prs changes
-  useEffect(() => {
-    setPRHistory(prev => {
-      const next = { ...prev };
-      Object.entries(prs).forEach(([id, pr]) => {
-        if (!next[id]) next[id] = [];
-        const last = next[id][next[id].length - 1];
-        if (!last || last.weight !== pr.weight || last.reps !== pr.reps) {
-          next[id] = [...next[id].slice(-9), { ...pr }];
+  const persist = (key,val) => { try{localStorage.setItem(key,JSON.stringify(val));}catch{} };
+
+  const setPrs          = v => { const n=typeof v==="function"?v(prs):v;          setPrsRaw(n);         persist("ir_prs",n); };
+  const setSessions     = v => { const n=typeof v==="function"?v(sessions):v;     setSessionsRaw(n);    persist("ir_sessions",n); };
+  const setPRHistory    = v => { const n=typeof v==="function"?v(prHistory):v;    setPRHistoryRaw(n);   persist("ir_prHistory",n); };
+  const setUserProfile  = v => { const n=typeof v==="function"?v(userProfile):v;  setUserProfileRaw(n); persist("ir_profile",n); };
+  const setGoals        = v => { const n=typeof v==="function"?v(goals):v;        setGoalsRaw(n);       persist("ir_goals",n); };
+  const setBodyWeightLog= v => { const n=typeof v==="function"?v(bodyWeightLog):v;setBodyWeightLogRaw(n);persist("ir_bwlog",n); };
+  const setCustomExercises=v=>{ const n=typeof v==="function"?v(customExercises):v;setCustomExercisesRaw(n);persist("ir_custom_ex",n); };
+
+  useEffect(()=>{
+    setPRHistory(prev=>{
+      const next={...prev};
+      Object.entries(prs).forEach(([id,pr])=>{
+        if(!next[id])next[id]=[];
+        const last=next[id][next[id].length-1];
+        if(!last||last.weight!==pr.weight||last.reps!==pr.reps){
+          next[id]=[...next[id].slice(-9),{...pr}];
         }
       });
       return next;
     });
-  }, [prs]);
+  },[prs]);
 
   const prCount  = Object.keys(prs).length;
   const sesCount = sessions.length;
-  const overallScore = useMemo(() => {
-    const scores = MUSCLES.map(m => getMuscleScore(m, prs)).filter(s => s > 0);
-    return scores.length ? Math.round(scores.reduce((s,x) => s+x, 0) / scores.length) : 0;
-  }, [prs]);
-  const newAchs = useMemo(() => ACHIEVEMENTS.filter(a => a.check(prs, sessions, overallScore)).length, [prs, sessions, overallScore]);
+  const overallScore = useMemo(()=>{
+    const scores=MUSCLES.map(m=>getMuscleScore(m,prs)).filter(s=>s>0);
+    return scores.length?Math.round(scores.reduce((s,x)=>s+x,0)/scores.length):0;
+  },[prs]);
+  const newAchs = useMemo(()=>ACHIEVEMENTS.filter(a=>a.check(prs,sessions,overallScore,customExercises,goals)).length,[prs,sessions,overallScore,customExercises,goals]);
 
   return (
     <>
       <style>{CSS}</style>
       <div className="app">
+        {/* HEADER */}
         <div className="hdr">
           <div>
             <div className="logo">IRON<em>RANK</em></div>
             <div className="logo-sub">Strength Tracker</div>
           </div>
-          <div className="hdr-stats">
-            <div><span>{prCount}</span> PRs · <span>{sesCount}</span> Sessions</div>
-            {newAchs > 0 && <div style={{ color:"var(--gld)" }}>🏆 {newAchs} achievements</div>}
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div className="hdr-stats">
+              <div><span>{prCount}</span> PRs · <span>{sesCount}</span> Einheiten</div>
+              {newAchs>0&&<div style={{color:"var(--gld)"}}>🏆 {newAchs} Achievements</div>}
+            </div>
+            {/* Custom exercise button */}
+            <button title="Eigene Übung" onClick={()=>setShowAddCustom(true)} style={{background:"none",border:"1px solid var(--bdr2)",borderRadius:8,padding:"6px 10px",color:"var(--muted)",fontSize:16,cursor:"pointer",flexShrink:0}}>➕</button>
           </div>
         </div>
 
+        {/* NAV */}
         <div className="nav">
-          {TABS.map(t => (
+          {TABS.map(t=>(
             <button key={t.id} className={`nav-btn ${tab===t.id?"active":""}`} onClick={()=>setTab(t.id)}>
               {t.label}
-              {t.id==="achievements" && newAchs > 0 && <span style={{ marginLeft:3, color:"var(--gld)" }}>•</span>}
+              {t.id==="achievements"&&newAchs>0&&<span style={{marginLeft:3,color:"var(--gld)"}}>•</span>}
             </button>
           ))}
         </div>
 
-        {tab==="dashboard"    && <DashboardTab    prs={prs} sessions={sessions} onNavigate={setTab} />}
-        {tab==="prs"          && <PRsTab          prs={prs} setPrs={setPrs} prHistory={prHistory} />}
-        {tab==="log"          && <LogTab          sessions={sessions} setSessions={setSessions} prs={prs} setPrs={setPrs} />}
-        {tab==="stats"        && <StatsTab        sessions={sessions} prs={prs} />}
-        {tab==="achievements" && <AchievementsTab prs={prs} sessions={sessions} />}
+        {tab==="dashboard"    && <DashboardTab    prs={prs} sessions={sessions} onNavigate={setTab} userProfile={userProfile} />}
+        {tab==="prs"          && <PRsTab          prs={prs} setPrs={setPrs} prHistory={prHistory} customExercises={customExercises} />}
+        {tab==="log"          && <LogTab          sessions={sessions} setSessions={setSessions} prs={prs} setPrs={setPrs} userProfile={userProfile} customExercises={customExercises} />}
+        {tab==="stats"        && <StatsTab        sessions={sessions} prs={prs} userProfile={userProfile} bodyWeightLog={bodyWeightLog} />}
+        {tab==="achievements" && <AchievementsTab prs={prs} sessions={sessions} customExercises={customExercises} goals={goals} />}
+        {tab==="profile"      && <ProfileTab      userProfile={userProfile} setUserProfile={setUserProfile} goals={goals} setGoals={setGoals} bodyWeightLog={bodyWeightLog} setBodyWeightLog={setBodyWeightLog} prs={prs} />}
+
+        {showAddCustom&&(
+          <CustomExModal
+            onAdd={ex=>{setCustomExercises(prev=>[...prev,ex]);setShowAddCustom(false);}}
+            onClose={()=>setShowAddCustom(false)}
+          />
+        )}
       </div>
     </>
   );
 }
 
-
-    // Mount the app
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<IronRank />);
+const root=ReactDOM.createRoot(document.getElementById("root"));
+root.render(<IronRank />);
   </script>
 
   <script>
-    // Register service worker for offline support + PWA install
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
+    if("serviceWorker"in navigator){
+      window.addEventListener("load",()=>{
         navigator.serviceWorker.register("/sw.js")
-          .then(reg => console.log("SW registered:", reg.scope))
-          .catch(err => console.log("SW failed:", err));
+          .then(reg=>console.log("SW registered:",reg.scope))
+          .catch(err=>console.log("SW failed:",err));
       });
     }
   </script>
