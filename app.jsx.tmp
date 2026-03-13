@@ -1,0 +1,1531 @@
+const { useState, useMemo, useEffect } = React;
+
+/* ═══════════════════════════════════════════════════════════  RANK SYSTEM  */
+const RANKS = [
+  { name:"Beginner",     pct:0,  color:"#718096", bg:"rgba(113,128,150,0.12)" },
+  { name:"Novice",       pct:20, color:"#48bb78", bg:"rgba(72,187,120,0.12)"  },
+  { name:"Intermediate", pct:40, color:"#4299e1", bg:"rgba(66,153,225,0.12)"  },
+  { name:"Advanced",     pct:60, color:"#ecc94b", bg:"rgba(236,201,75,0.12)"  },
+  { name:"Pro",          pct:80, color:"#ed8936", bg:"rgba(237,137,54,0.12)"  },
+  { name:"Elite",        pct:95, color:"#fc5c7d", bg:"rgba(252,92,125,0.12)"  },
+];
+const getRank    = p => [...RANKS].reverse().find(r => p >= r.pct) || RANKS[0];
+const getNextRank= p => RANKS.find(r => p < r.pct) || null;
+
+/* ═══════════════════════════════════════════════════════════  SCORE CALC  */
+const epley1RM = (w, r) => w * (1 + Math.min(r, 30) / 30);
+const scoreFromThresholds = (val, [t0, t1, t2, t3, t4, t5]) => {
+  const thresholds = [0, t0, t1, t2, t3, t4, t5];
+  const pctBands   = [0, 20, 40, 60, 80, 95, 100];
+  for (let i = 1; i < thresholds.length; i++) {
+    if (val <= thresholds[i]) {
+      const lo = thresholds[i-1], hi = thresholds[i];
+      const t  = lo === hi ? 1 : (val - lo) / (hi - lo);
+      return Math.round((pctBands[i-1] + t * (pctBands[i] - pctBands[i-1])) * 10) / 10;
+    }
+  }
+  return 100;
+};
+const calcScore = (weight, reps, s) => {
+  if (!weight || !reps || weight <= 0 || reps <= 0) return 0;
+  const e1rm = epley1RM(weight, reps);
+  return Math.min(100, scoreFromThresholds(e1rm, [s.beg,s.nov,s.int,s.adv,s.pro,s.eli]));
+};
+const calcRepsScore = (reps, s) => {
+  if (!reps || reps <= 0) return 0;
+  return Math.min(100, scoreFromThresholds(reps, [s.beg,s.nov,s.int,s.adv,s.pro,s.eli]));
+};
+const getExScore = (ex, pr) => {
+  if (!pr) return 0;
+  return ex.isReps ? calcRepsScore(pr.reps, ex.s) : calcScore(pr.weight, pr.reps, ex.s);
+};
+
+/* ─── top % mapping: score 0→100 maps to top 100%→top 0.5% ─── */
+const scoreToTopPct = s => {
+  if (s <= 0)  return 100;
+  if (s >= 95) return 1;
+  if (s >= 80) return Math.round(1 + (95 - s) / 15 * 9);
+  if (s >= 60) return Math.round(10 + (80 - s) / 20 * 20);
+  if (s >= 40) return Math.round(30 + (60 - s) / 20 * 30);
+  if (s >= 20) return Math.round(60 + (40 - s) / 20 * 30);
+  return Math.round(90 + (20 - s) / 20 * 10);
+};
+
+/* ═══════════════════════════════════════════════════════════  EXERCISES  */
+const EX = {
+  Chest: [
+    { id:"bench",        name:"Bench Press",             s:{beg:47, nov:70, int:98,  adv:132,pro:169,eli:210}, note:"Total barbell weight incl. 20 kg bar. Classic flat-bench press." },
+    { id:"incline_bench",name:"Incline Bench Press",     s:{beg:44, nov:64, int:89,  adv:118,pro:149,eli:185}, note:"Total barbell weight incl. 20 kg bar. Bench set to ~30–45°." },
+    { id:"close_bench",  name:"Close-Grip Bench",        s:{beg:47, nov:68, int:93,  adv:123,pro:155,eli:190}, note:"Total barbell weight. Hands shoulder-width apart — heavy tricep focus." },
+    { id:"db_bench",     name:"Dumbbell Bench Press",    s:{beg:16, nov:27, int:41,  adv:57, pro:75, eli:95 }, note:"Weight per dumbbell (each hand separately). E.g. enter 30 if using 2 × 30 kg." },
+    { id:"db_incline",   name:"Incline DB Press",        s:{beg:13, nov:22, int:34,  adv:48, pro:63, eli:80 }, note:"Weight per dumbbell (each hand). Bench at 30–45°." },
+    { id:"db_fly",       name:"Dumbbell Fly",            s:{beg:6,  nov:13, int:24,  adv:37, pro:52, eli:68 }, note:"Weight per dumbbell (each hand). Slight elbow bend, wide arc down and up." },
+    { id:"pushups",      name:"Push-Ups",                s:{beg:1,  nov:18, int:41,  adv:68, pro:99, eli:130}, note:"Number of REPS with bodyweight, no extra weight. Full chest-to-floor range.", isReps:true },
+    { id:"dips",         name:"Dips",                    s:{beg:0,  nov:8,  int:20,  adv:34, pro:49, eli:65 }, note:"Number of REPS with bodyweight (no added weight). Full lockout at top.", isReps:true },
+  ],
+  Back: [
+    { id:"deadlift",     name:"Deadlift",                s:{beg:78, nov:112,int:152, adv:200,pro:250,eli:305}, note:"Total barbell weight incl. 20 kg bar. Pull from floor, full lockout at top." },
+    { id:"bent_row",     name:"Bent-Over Row",           s:{beg:41, nov:60, int:85,  adv:115,pro:147,eli:183}, note:"Total barbell weight incl. 20 kg bar. Torso ~parallel to floor." },
+    { id:"lat_pulldown", name:"Lat Pulldown",            s:{beg:38, nov:58, int:82,  adv:110,pro:141,eli:175}, note:"Machine stack weight. Pull bar down to upper chest, squeeze lats." },
+    { id:"seated_row",   name:"Seated Cable Row",        s:{beg:41, nov:61, int:86,  adv:115,pro:147,eli:183}, note:"Machine stack weight. Pull handle to your lower abdomen, keep back straight." },
+    { id:"pullup",       name:"Pull-Ups",                s:{beg:0,  nov:5,  int:14,  adv:25, pro:37, eli:50 }, note:"Number of REPS, bodyweight only (overhand grip). Enter 0 if not yet possible.", isReps:true },
+    { id:"chinup",       name:"Chin-Ups",                s:{beg:0,  nov:6,  int:14,  adv:24, pro:35, eli:48 }, note:"Number of REPS, bodyweight only (underhand/supinated grip).", isReps:true },
+    { id:"db_row",       name:"Dumbbell Row",            s:{beg:16, nov:27, int:43,  adv:62, pro:83, eli:105}, note:"Weight per dumbbell (one arm at a time). Brace other hand on bench." },
+    { id:"rdl",          name:"Romanian Deadlift",       s:{beg:55, nov:84, int:120, adv:164,pro:211,eli:260}, note:"Total barbell weight. Keep slight knee bend, push hips back — not a squat." },
+  ],
+  Legs: [
+    { id:"squat",        name:"Back Squat",              s:{beg:64, nov:93, int:130, adv:173,pro:219,eli:270}, note:"Total barbell weight incl. 20 kg bar. Bar on upper back, squat to parallel or below." },
+    { id:"leg_press",    name:"Leg Press (Sled)",        s:{beg:86, nov:147,int:226, adv:324,pro:432,eli:550}, note:"Total weight on the sled — does NOT include the sled machine itself." },
+    { id:"hip_thrust",   name:"Hip Thrust",              s:{beg:38, nov:76, int:129, adv:196,pro:273,eli:350}, note:"Total barbell weight. Shoulders on bench, drive hips to full lockout." },
+    { id:"front_squat",  name:"Front Squat",             s:{beg:47, nov:70, int:99,  adv:134,pro:172,eli:215}, note:"Total barbell weight incl. 20 kg bar. Bar on front delts, elbows up." },
+    { id:"leg_ext",      name:"Leg Extension",           s:{beg:35, nov:61, int:96,  adv:139,pro:186,eli:235}, note:"Machine stack weight. Extend both legs fully — squeeze quads at top." },
+    { id:"leg_curl",     name:"Lying Leg Curl",          s:{beg:23, nov:40, int:64,  adv:93, pro:126,eli:160}, note:"Machine stack weight. Lie face-down, curl both legs toward glutes." },
+    { id:"calf_raise",   name:"Machine Calf Raise",      s:{beg:31, nov:72, int:134, adv:214,pro:307,eli:400}, note:"Machine stack weight (standing calf raise machine). Full stretch at bottom, full extension at top." },
+    { id:"bss",          name:"Bulgarian Split Squat",   s:{beg:8,  nov:17, int:30,  adv:46, pro:63, eli:82 }, note:"Weight per dumbbell (each hand). Rear foot elevated on bench, front foot far forward." },
+  ],
+  Shoulders: [
+    { id:"ohp",          name:"Overhead Press",          s:{beg:30, nov:45, int:64,  adv:87, pro:112,eli:140}, note:"Total barbell weight incl. 20 kg bar. Press from chin-level overhead to full lockout." },
+    { id:"db_press",     name:"DB Shoulder Press",       s:{beg:10, nov:18, int:28,  adv:40, pro:54, eli:70 }, note:"Weight per dumbbell (each hand). Seated or standing, press overhead." },
+    { id:"lateral",      name:"Lateral Raise",           s:{beg:4,  nov:8,  int:13,  adv:19, pro:27, eli:36 }, note:"Weight per dumbbell (each hand). Raise to shoulder height — control the negative." },
+    { id:"db_shrug",     name:"Dumbbell Shrug",          s:{beg:14, nov:27, int:46,  adv:70, pro:97, eli:125}, note:"Weight per dumbbell (each hand). Shrug straight up, hold 1 sec at top." },
+    { id:"bb_shrug",     name:"Barbell Shrug",           s:{beg:46, nov:82, int:131, adv:191,pro:258,eli:325}, note:"Total barbell weight incl. 20 kg bar. Shrug straight up, no rolling shoulders." },
+  ],
+  Arms: [
+    { id:"bb_curl",      name:"Barbell Curl",            s:{beg:17, nov:30, int:47,  adv:68, pro:91, eli:115}, note:"Total barbell/EZ-bar weight (EZ-bar ~10 kg, straight bar ~20 kg). No body swing." },
+    { id:"db_curl",      name:"Dumbbell Curl",           s:{beg:6,  nov:13, int:23,  adv:36, pro:51, eli:65 }, note:"Weight per dumbbell (each hand). Supinate (rotate) at the peak." },
+    { id:"hammer",       name:"Hammer Curl",             s:{beg:8,  nov:15, int:23,  adv:34, pro:46, eli:60 }, note:"Weight per dumbbell (each hand). Neutral grip throughout — thumbs pointing up." },
+    { id:"preacher",     name:"Preacher Curl",           s:{beg:17, nov:29, int:46,  adv:66, pro:89, eli:112}, note:"Total EZ-bar/barbell weight. Arm rests on pad, isolates bicep fully." },
+    { id:"tricep_push",  name:"Tricep Pushdown",         s:{beg:17, nov:34, int:57,  adv:86, pro:119,eli:155}, note:"Machine stack weight (cable). Keep elbows pinned to sides throughout." },
+    { id:"skull",        name:"Skull Crusher",           s:{beg:20, nov:33, int:49,  adv:68, pro:89, eli:112}, note:"Total EZ-bar/barbell weight. Lower to forehead, elbows stationary." },
+    { id:"cg_bench_tri", name:"Close-Grip Bench (Tri)",  s:{beg:47, nov:68, int:93,  adv:123,pro:155,eli:190}, note:"Total barbell weight. Like bench press but hands shoulder-width — tricep focus." },
+  ],
+  Core: [
+    { id:"cable_crunch", name:"Cable Crunch",            s:{beg:15, nov:25, int:38,  adv:55, pro:75, eli:95 }, note:"Machine stack weight. Kneel, pull rope down, crunch abs toward knees." },
+    { id:"leg_raise",    name:"Hanging Leg Raise",       s:{beg:0,  nov:5,  int:10,  adv:15, pro:20, eli:25 }, note:"Number of REPS bodyweight. Hang from bar, raise straight legs to parallel or higher.", isReps:true },
+    { id:"ab_wheel",     name:"Ab Wheel Rollout",        s:{beg:0,  nov:5,  int:12,  adv:20, pro:28, eli:35 }, note:"Number of REPS. Roll out as far as possible from knees or toes, keep core tight.", isReps:true },
+  ],
+};
+
+const ALL_EX = Object.entries(EX).flatMap(([m, list]) => list.map(e => ({ ...e, muscle: m })));
+const MUSCLES = Object.keys(EX);
+
+const getMuscleScore = (muscle, prs) => {
+  const list = EX[muscle] || [];
+  return list.reduce((best, ex) => Math.max(best, getExScore(ex, prs[ex.id])), 0);
+};
+
+/* ═══════════════════════════════════════════════════════════  ACHIEVEMENTS  */
+const ACHIEVEMENTS = [
+  // Beginner milestones
+  { id:"first_pr",    icon:"🌱", title:"First Blood",         desc:"Log your very first PR",                   check:(prs,_) => Object.keys(prs).length >= 1 },
+  { id:"five_prs",    icon:"🏋️", title:"Getting Started",     desc:"Log 5 PRs",                                check:(prs,_) => Object.keys(prs).length >= 5 },
+  { id:"all_muscles", icon:"🗺️", title:"Full Body Explorer",  desc:"Log at least one PR for every muscle group",check:(prs,_) => MUSCLES.every(m => EX[m].some(e => prs[e.id])) },
+  // Strength standards
+  { id:"bench_bw",    icon:"🎯", title:"Bodyweight Bench",    desc:"Bench Press your bodyweight (1×BW est.1RM)", check:(prs,_) => { const p=prs.bench; return p && epley1RM(p.weight,p.reps) >= 80; } },
+  { id:"bench_1_25",  icon:"💥", title:"1.25× Bench",         desc:"Bench Press 1.25× bodyweight",             check:(prs,_) => { const p=prs.bench; return p && epley1RM(p.weight,p.reps) >= 100; } },
+  { id:"squat_1_5",   icon:"🦵", title:"1.5× Squat",          desc:"Back Squat 1.5× bodyweight",               check:(prs,_) => { const p=prs.squat; return p && epley1RM(p.weight,p.reps) >= 120; } },
+  { id:"squat_2x",    icon:"👑", title:"Double Squat",        desc:"Back Squat 2× bodyweight",                 check:(prs,_) => { const p=prs.squat; return p && epley1RM(p.weight,p.reps) >= 160; } },
+  { id:"dead_2x",     icon:"🔱", title:"2× Deadlift",         desc:"Deadlift 2× bodyweight",                   check:(prs,_) => { const p=prs.deadlift; return p && epley1RM(p.weight,p.reps) >= 160; } },
+  { id:"dead_2_5",    icon:"⚡", title:"2.5× Deadlift",       desc:"Deadlift 2.5× bodyweight",                 check:(prs,_) => { const p=prs.deadlift; return p && epley1RM(p.weight,p.reps) >= 200; } },
+  { id:"ohp_bw",      icon:"🏔️", title:"Overhead Master",    desc:"Overhead Press 0.75× bodyweight",          check:(prs,_) => { const p=prs.ohp; return p && epley1RM(p.weight,p.reps) >= 60; } },
+  // Bodyweight exercises
+  { id:"pullup_10",   icon:"🦅", title:"10 Pull-Ups",         desc:"Do 10 consecutive pull-ups",               check:(prs,_) => (prs.pullup?.reps||0) >= 10 },
+  { id:"pullup_20",   icon:"🦅", title:"20 Pull-Ups",         desc:"Do 20 consecutive pull-ups",               check:(prs,_) => (prs.pullup?.reps||0) >= 20 },
+  { id:"pushup_50",   icon:"💪", title:"50 Push-Ups",         desc:"Do 50 consecutive push-ups",               check:(prs,_) => (prs.pushups?.reps||0) >= 50 },
+  { id:"dip_20",      icon:"⚙️", title:"20 Dips",             desc:"Do 20 consecutive dips",                   check:(prs,_) => (prs.dips?.reps||0) >= 20 },
+  // Score milestones
+  { id:"score_50",    icon:"📈", title:"Halfway There",       desc:"Reach an overall score of 50",             check:(prs,_,overall) => overall >= 50 },
+  { id:"score_70",    icon:"🚀", title:"Advanced Lifter",     desc:"Reach an overall score of 70",             check:(prs,_,overall) => overall >= 70 },
+  { id:"score_90",    icon:"💎", title:"Near Elite",          desc:"Reach an overall score of 90",             check:(prs,_,overall) => overall >= 90 },
+  // Session milestones
+  { id:"session_10",  icon:"📅", title:"10 Sessions",         desc:"Log 10 training sessions",                 check:(_,sessions) => sessions.length >= 10 },
+  { id:"session_50",  icon:"🗓️", title:"50 Sessions",        desc:"Log 50 training sessions",                 check:(_,sessions) => sessions.length >= 50 },
+  { id:"streak_7",    icon:"🔥", title:"Week Warrior",        desc:"Train 7 days in a row",                    check:(_,sessions) => {
+    const dates = new Set(sessions.map(s => s.date));
+    let streak = 0;
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      if (dates.has(d.toISOString().slice(0,10))) streak++; else if (i > 0) break;
+    }
+    return streak >= 7;
+  }},
+  { id:"vol_10k",     icon:"🏗️", title:"10,000 kg Volume",   desc:"Lift 10,000 kg total in a single session", check:(_,sessions) => sessions.some(s => s.totalVol >= 10000) },
+];
+
+/* ═══════════════════════════════════════════════════════════  FUN FACTS  */
+const FUN_FACTS = [
+  { icon:"🧠", text:"The average gym-goer in Europe bench presses ~70 kg. You're competing with millions." },
+  { icon:"🦴", text:"Bone density improves with heavy lifting — strength training is literally making your skeleton harder." },
+  { icon:"⚡", text:"A single rep of a heavy deadlift activates over 600 muscles simultaneously." },
+  { icon:"🔬", text:"Muscle hypertrophy (growth) peaks 24–48 h after training — recovery IS training." },
+  { icon:"🏆", text:"The world record bench press is 355 kg (raw). The world record deadlift is 501 kg." },
+  { icon:"🧪", text:"Progressive overload — not supplements — is responsible for ~90% of strength gains." },
+  { icon:"😴", text:"You release the most testosterone and growth hormone in the first 2 hours of deep sleep." },
+  { icon:"🔥", text:"After a heavy leg session, your metabolism stays elevated for up to 48 hours." },
+  { icon:"💡", text:"The 1RM Epley formula (used here) is accurate to within 5% for most lifters." },
+  { icon:"🌍", text:"strengthlevel.de bases its standards on millions of real training logs from across the world." },
+  { icon:"⏱️", text:"Rest 3–5 minutes between heavy compound sets for maximal strength gains." },
+  { icon:"🥩", text:"Eating 1.6 g protein per kg bodyweight is as effective as 3.2 g/kg for muscle growth." },
+  { icon:"📊", text:"The Intermediate rank (~40%) means you lift more than ~60% of all gym-goers. That's already impressive." },
+  { icon:"🎯", text:"Consistency over intensity — 3 mediocre sessions beat 1 perfect session every week." },
+];
+
+/* ═══════════════════════════════════════════════════════════  HELPERS  */
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const fmtDate  = iso => { if (!iso) return ""; const d = new Date(iso+"T00:00:00"); return d.toLocaleDateString("en-US", {month:"short",day:"numeric",year:"numeric"}); };
+const fmtShort = iso => { if (!iso) return ""; const d = new Date(iso+"T00:00:00"); return d.toLocaleDateString("en-US", {month:"short",day:"numeric"}); };
+const weekChar = iso  => { const d = new Date(iso+"T00:00:00"); return ["Su","Mo","Tu","We","Th","Fr","Sa"][d.getDay()]; };
+
+/* ═══════════════════════════════════════════════════════════  CSS  */
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Sans:wght@400;500;600&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07090e;--bg2:#0c1018;--surf:#111820;--surf2:#16202e;
+  --bdr:#1c2838;--bdr2:#253346;--text:#c8d6e5;--text2:#8fa3b8;--muted:#4a5e72;
+  --acc:#38bdf8;--red:#f43f5e;--grn:#34d399;--gld:#fbbf24;
+  --head:'Barlow Condensed',sans-serif;--body:'DM Sans',sans-serif;
+}
+html,body{background:var(--bg)}
+.app{min-height:100vh;max-width:500px;margin:0 auto;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.5}
+
+/* header */
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;background:var(--bg2);border-bottom:1px solid var(--bdr)}
+.logo{font-family:var(--head);font-size:26px;font-weight:800;letter-spacing:1px;color:#fff;line-height:1}
+.logo em{color:var(--acc);font-style:normal}
+.logo-sub{font-family:var(--head);font-size:11px;font-weight:500;letter-spacing:2.5px;color:var(--muted);text-transform:uppercase;margin-top:1px}
+.hdr-stats{text-align:right;font-family:var(--head);font-size:12px;color:var(--muted);letter-spacing:1px;line-height:1.7}
+.hdr-stats span{color:var(--text2)}
+
+/* nav */
+.nav{display:flex;background:var(--bg2);border-bottom:1px solid var(--bdr);overflow-x:auto;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav-btn{flex:1;min-width:68px;padding:11px 4px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--head);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;white-space:nowrap;transition:color .18s,border-color .18s}
+.nav-btn.active{color:var(--acc);border-bottom-color:var(--acc);background:rgba(56,189,248,.04)}
+
+/* scroll */
+.scroll{padding:18px 16px 80px;overflow-y:auto;max-height:calc(100vh - 110px)}
+
+/* type */
+.h1{font-family:var(--head);font-size:26px;font-weight:800;color:#fff}
+.h2{font-family:var(--head);font-size:20px;font-weight:700;color:#fff}
+.h3{font-family:var(--head);font-size:16px;font-weight:700;color:var(--text)}
+.lbl{font-family:var(--head);font-size:11px;font-weight:600;letter-spacing:2.5px;color:var(--muted);text-transform:uppercase;margin:22px 0 10px;display:flex;align-items:center;gap:10px}
+.lbl::after{content:'';flex:1;height:1px;background:var(--bdr)}
+
+/* card */
+.card{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;padding:16px;margin-bottom:10px}
+.clist{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;overflow:hidden;margin-bottom:10px}
+
+/* row */
+.row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--bdr)}
+.row:last-child{border-bottom:none}
+.row:hover{background:rgba(255,255,255,.015)}
+
+/* badge */
+.badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;border:1px solid;font-family:var(--head);font-size:12px;font-weight:700;letter-spacing:1px}
+
+/* bar */
+.bar-t{height:5px;background:var(--bdr);border-radius:3px;overflow:hidden}
+.bar-f{height:100%;border-radius:3px;transition:width .6s cubic-bezier(.23,1,.32,1)}
+
+/* stats */
+.sg2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.sg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
+.sbox{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;padding:14px 12px;text-align:center}
+.sval{font-family:var(--head);font-size:28px;font-weight:800;line-height:1;color:#fff}
+.sunit{font-size:13px;color:var(--muted);margin-left:2px}
+.slbl{font-size:12px;color:var(--text2);margin-top:4px}
+
+/* form */
+.flbl{display:block;font-family:var(--head);font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;margin-bottom:5px}
+.finp,.fsel{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--bdr2);border-radius:8px;color:var(--text);font-family:var(--body);font-size:15px;outline:none;transition:border-color .18s;-webkit-appearance:none}
+.finp:focus,.fsel:focus{border-color:var(--acc)}
+.finp::placeholder{color:var(--muted)}
+.fg{margin-bottom:12px}
+.fr2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fr3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+
+/* buttons */
+.btn{width:100%;padding:13px;background:var(--acc);border:none;border-radius:8px;color:#000;font-family:var(--head);font-size:15px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;transition:opacity .18s,transform .1s}
+.btn:hover{opacity:.88}
+.btn:active{transform:scale(.99)}
+.btn-g{padding:9px 16px;background:var(--surf2);border:1px solid var(--bdr2);border-radius:8px;color:var(--text);font-family:var(--body);font-size:14px;cursor:pointer;transition:border-color .18s}
+.btn-g:hover{border-color:var(--acc);color:var(--acc)}
+.btn-i{padding:7px 12px;background:var(--surf2);border:1px solid var(--bdr);border-radius:6px;color:var(--muted);font-size:13px;cursor:pointer;transition:all .15s}
+.btn-i:hover{color:var(--text)}
+.btn-d{padding:6px 12px;background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.3);border-radius:6px;color:var(--red);font-family:var(--head);font-size:12px;font-weight:700;cursor:pointer;transition:background .18s}
+.btn-d:hover{background:rgba(244,63,94,.2)}
+
+/* filter */
+.fbar{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;scrollbar-width:none}
+.fbar::-webkit-scrollbar{display:none}
+.fpill{padding:5px 13px;border-radius:20px;border:1px solid var(--bdr2);background:none;color:var(--muted);font-family:var(--head);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s}
+.fpill.active{border-color:var(--acc);color:var(--acc);background:rgba(56,189,248,.08)}
+
+/* rank hero */
+.rhero{border-radius:12px;padding:22px 20px 18px;margin-bottom:14px;text-align:center;position:relative;overflow:hidden}
+.rnum{font-family:var(--head);font-size:68px;font-weight:800;line-height:1;display:block}
+.rname{font-family:var(--head);font-size:22px;font-weight:700;letter-spacing:3px;text-transform:uppercase;margin-bottom:14px}
+
+/* streak */
+.streak{background:linear-gradient(135deg,rgba(244,63,94,.12),rgba(56,189,248,.06));border:1px solid rgba(244,63,94,.22);border-radius:12px;padding:18px;margin-bottom:12px;display:flex;align-items:center;gap:16px}
+.streak-n{font-family:var(--head);font-size:54px;font-weight:800;color:var(--red);line-height:1}
+
+/* chart */
+.vchart{display:flex;align-items:flex-end;gap:5px;height:90px;margin-top:8px}
+.vbw{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.vb{width:100%;border-radius:3px 3px 0 0;min-height:2px;transition:height .5s ease}
+.vl{font-size:9px;color:var(--muted);letter-spacing:.5px}
+
+/* line chart */
+.lchart{position:relative;height:100px;width:100%;margin-top:8px}
+
+/* session */
+.sess{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;margin-bottom:10px;overflow:hidden}
+.sess-h{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;transition:background .15s}
+.sess-h:hover{background:rgba(255,255,255,.02)}
+.sess-b{padding:0 16px 14px}
+.sess-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bdr);font-size:14px}
+.sess-row:last-child{border-bottom:none}
+
+/* note */
+.note{display:flex;align-items:flex-start;gap:8px;background:rgba(56,189,248,.07);border:1px solid rgba(56,189,248,.18);border-radius:8px;padding:9px 12px;margin-top:8px;font-size:13px;line-height:1.5;color:var(--text2);width:100%}
+.note-i{color:var(--acc);flex-shrink:0;font-size:15px;margin-top:1px}
+
+/* hint */
+.hint{font-size:13px;color:var(--text2);background:var(--surf2);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px;margin-top:6px;line-height:1.5}
+.hint strong{color:var(--acc)}
+
+/* achievement */
+.ach{background:var(--surf);border:1px solid var(--bdr);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;transition:border-color .2s}
+.ach.done{border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.04)}
+.ach.locked{opacity:.5;filter:grayscale(.7)}
+.ach-icon{font-size:28px;flex-shrink:0;width:44px;text-align:center}
+.ach-title{font-family:var(--head);font-size:15px;font-weight:700;color:#fff;margin-bottom:2px}
+.ach-desc{font-size:12px;color:var(--text2);line-height:1.4}
+.ach-done-badge{font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;color:var(--gld);background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.3);border-radius:20px;padding:2px 8px;flex-shrink:0}
+
+/* fun fact */
+.fact{background:linear-gradient(135deg,rgba(56,189,248,.07),rgba(0,0,0,0));border:1px solid rgba(56,189,248,.2);border-radius:10px;padding:14px 16px;margin-bottom:14px;display:flex;gap:12px;align-items:flex-start}
+.fact-i{font-size:22px;flex-shrink:0;margin-top:2px}
+.fact-t{font-size:13px;color:var(--text2);line-height:1.6}
+
+/* week dots */
+.wdots{display:flex;justify-content:space-between;margin-bottom:10px}
+.wdot{text-align:center}
+.wdot-c{width:34px;height:34px;border-radius:8px;margin:0 auto 4px;display:flex;align-items:center;justify-content:center;font-size:16px;border:1px solid var(--bdr);background:var(--bg);transition:all .2s}
+.wdot-c.tr{background:rgba(56,189,248,.15);border-color:var(--acc)}
+.wdot-l{font-size:10px;color:var(--muted)}
+.wdot-l.tr{color:var(--acc)}
+
+/* top% pill */
+.top-pct{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-family:var(--head);font-size:13px;font-weight:700;letter-spacing:1px}
+
+/* progress sparkline */
+.sparkline{display:flex;align-items:flex-end;gap:3px;height:40px;margin-top:6px}
+.spark-bar{flex:1;border-radius:2px 2px 0 0;min-height:2px;transition:height .4s ease}
+
+/* empty */
+.empty{text-align:center;padding:50px 20px;color:var(--muted);font-size:14px;line-height:2}
+.empty-i{font-size:40px;display:block;margin-bottom:8px}
+
+/* balance meter */
+.balance-item{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.balance-label{font-size:13px;font-weight:600;min-width:90px;color:var(--text)}
+.balance-track{flex:1;height:8px;background:var(--bdr);border-radius:4px;overflow:hidden}
+.balance-fill{height:100%;border-radius:4px;transition:width .6s cubic-bezier(.23,1,.32,1)}
+
+/* anim */
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fi{animation:fadeUp .22s ease}
+@keyframes popIn{0%{opacity:0;transform:scale(0.88)}100%{opacity:1;transform:scale(1)}}
+.pop{animation:popIn .3s ease}
+@keyframes glow{0%,100%{opacity:1}50%{opacity:.6}}
+.glow{animation:glow 2s infinite}
+`;
+
+/* ═══════════════════════════════════════════════════════════  MINI COMPONENTS  */
+function Badge({ score }) {
+  const r = getRank(score);
+  return <span className="badge" style={{ color:r.color, borderColor:r.color+"44", background:r.bg }}>{r.name}</span>;
+}
+function Bar({ pct, color }) {
+  return <div className="bar-t"><div className="bar-f" style={{ width:`${Math.min(100,pct)}%`, background:color, boxShadow:`0 0 6px ${color}55` }} /></div>;
+}
+function Lbl({ children }) {
+  return <div className="lbl">{children}</div>;
+}
+
+/* ═══════════════════════════════════════════════════════════  DASHBOARD  */
+function DashboardTab({ prs, sessions, onNavigate }) {
+  const muscleScores = useMemo(() =>
+    MUSCLES.map(m => ({ muscle:m, score: getMuscleScore(m, prs) })),
+  [prs]);
+
+  const overall = useMemo(() => {
+    const f = muscleScores.filter(m => m.score > 0);
+    return f.length ? Math.round(f.reduce((s,m) => s+m.score, 0) / f.length) : 0;
+  }, [muscleScores]);
+
+  const rank = getRank(overall);
+  const next = getNextRank(overall);
+  const topPct = scoreToTopPct(overall);
+
+  const last7 = useMemo(() => {
+    const dates = new Set(sessions.map(s => s.date));
+    return Array.from({length:7}, (_,i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6-i));
+      const iso = d.toISOString().slice(0,10);
+      return { iso, label:weekChar(iso), trained:dates.has(iso) };
+    });
+  }, [sessions]);
+
+  const fact = useMemo(() => FUN_FACTS[new Date().getDate() % FUN_FACTS.length], []);
+
+  const strongest = [...muscleScores].filter(m=>m.score>0).sort((a,b)=>b.score-a.score)[0];
+  const weakest   = [...muscleScores].filter(m=>m.score>0).sort((a,b)=>a.score-b.score)[0];
+
+  const ICONS = { Chest:"◈", Back:"◉", Legs:"◆", Shoulders:"◇", Arms:"◈", Core:"◎" };
+
+  return (
+    <div className="scroll fi">
+      {/* Rank Hero */}
+      <div className="rhero" style={{ background:`linear-gradient(135deg, ${rank.bg} 0%, rgba(0,0,0,0.2) 100%)`, border:`1px solid ${rank.color}30` }}>
+        <span className="rnum" style={{ color:rank.color, textShadow:`0 0 40px ${rank.color}55` }}>{overall}</span>
+        <div className="rname" style={{ color:rank.color }}>{rank.name}</div>
+        {overall > 0 && (
+          <div style={{ display:"flex", justifyContent:"center", marginBottom:12 }}>
+            <div className="top-pct" style={{ background:`rgba(${rank.color.slice(1).match(/.{2}/g).map(h=>parseInt(h,16)).join(",")},0.12)`, border:`1px solid ${rank.color}44`, color:rank.color }}>
+              Top {topPct}% worldwide
+            </div>
+          </div>
+        )}
+        {next ? (
+          <>
+            <Bar pct={overall===0 ? 0 : ((overall-rank.pct)/(next.pct-rank.pct))*100} color={rank.color} />
+            <div style={{ fontSize:12, color:"var(--muted)", marginTop:8 }}>
+              {next.pct - overall} pts to <strong style={{ color:next.color }}>{next.name}</strong>
+            </div>
+          </>
+        ) : (
+          <div style={{ fontSize:13, color:rank.color }}>Maximum rank achieved 🏆</div>
+        )}
+        <div style={{ fontSize:12, color:"var(--muted)", marginTop:6 }}>
+          Based on {Object.keys(prs).length} PRs logged
+        </div>
+      </div>
+
+      {/* Fun Fact */}
+      <div className="fact">
+        <span className="fact-i">{fact.icon}</span>
+        <span className="fact-t">{fact.text}</span>
+      </div>
+
+      {/* Week */}
+      <Lbl>This Week</Lbl>
+      <div className="card">
+        <div className="wdots">
+          {last7.map(d => (
+            <div key={d.iso} className="wdot">
+              <div className={`wdot-c ${d.trained?"tr":""}`}>{d.trained?"✓":""}</div>
+              <div className={`wdot-l ${d.trained?"tr":""}`}>{d.label}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize:13, color:"var(--text2)", textAlign:"center" }}>
+          {last7.filter(d=>d.trained).length} of 7 days trained this week
+        </div>
+      </div>
+
+      {/* Muscle Scores */}
+      <Lbl>Muscle Groups</Lbl>
+      {muscleScores.map(({ muscle, score }) => {
+        const r = getRank(score);
+        const tp = scoreToTopPct(score);
+        return (
+          <div key={muscle} className="card" style={{ padding:"14px 16px", borderColor:score>0 ? r.color+"25":"var(--bdr)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontSize:20, color:r.color }}>{ICONS[muscle]}</span>
+                <div>
+                  <div className="h3">{muscle}</div>
+                  {score > 0 ? (
+                    <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:2 }}>
+                      <Badge score={score} />
+                      <span style={{ fontSize:11, color:"var(--muted)" }}>Top {tp}%</span>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize:12, color:"var(--muted)" }}>No PRs yet</span>
+                  )}
+                </div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontFamily:"var(--head)", fontSize:30, fontWeight:800, color:score>0?r.color:"var(--muted)", lineHeight:1 }}>{score}</div>
+                <div style={{ fontSize:11, color:"var(--muted)" }}>/ 100</div>
+              </div>
+            </div>
+            <Bar pct={score} color={score>0?r.color:"var(--muted)"} />
+          </div>
+        );
+      })}
+
+      {/* Insights */}
+      {overall > 0 && (
+        <>
+          <Lbl>Quick Insights</Lbl>
+          <div className="sg2">
+            {strongest && (
+              <div className="sbox" style={{ borderColor:"rgba(52,211,153,.22)" }}>
+                <div style={{ fontSize:22, marginBottom:4 }}>💪</div>
+                <div className="slbl">Strongest</div>
+                <div style={{ fontFamily:"var(--head)", fontSize:18, fontWeight:700, color:"var(--grn)", marginTop:4 }}>{strongest.muscle}</div>
+                <div style={{ fontSize:12, color:"var(--muted)" }}>Score {strongest.score}</div>
+              </div>
+            )}
+            {weakest && (
+              <div className="sbox" style={{ borderColor:"rgba(244,63,94,.22)" }}>
+                <div style={{ fontSize:22, marginBottom:4 }}>🎯</div>
+                <div className="slbl">Focus Area</div>
+                <div style={{ fontFamily:"var(--head)", fontSize:18, fontWeight:700, color:"var(--red)", marginTop:4 }}>{weakest.muscle}</div>
+                <div style={{ fontSize:12, color:"var(--muted)" }}>Score {weakest.score}</div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {overall === 0 && (
+        <div style={{ marginTop:10, background:"rgba(56,189,248,.05)", border:"1px solid rgba(56,189,248,.15)", borderRadius:10, padding:"24px 20px", textAlign:"center" }}>
+          <div style={{ fontSize:36, marginBottom:10 }}>🏋️</div>
+          <div className="h2" style={{ marginBottom:6 }}>Set Your First PR</div>
+          <div style={{ fontSize:14, color:"var(--text2)" }}>Head to the <strong style={{ color:"var(--acc)" }}>PRs</strong> tab and log your best lifts to unlock your strength rank.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════  PRs TAB  */
+function PRsTab({ prs, setPrs, prHistory }) {
+  const [filter,  setFilter]  = useState("All");
+  const [editing, setEditing] = useState(null);
+  const [weight,  setWeight]  = useState("");
+  const [reps,    setReps]    = useState("");
+  const [flashId, setFlashId] = useState(null);
+
+  const filtered = filter === "All" ? ALL_EX : ALL_EX.filter(e => e.muscle === filter);
+
+  const startEdit = ex => {
+    const pr = prs[ex.id];
+    setEditing(ex.id);
+    setWeight(pr && !ex.isReps ? String(pr.weight) : "");
+    setReps(pr ? String(pr.reps) : "");
+  };
+
+  const save = ex => {
+    if (!reps) return;
+    const w = ex.isReps ? 0 : Number(weight);
+    const r = Number(reps);
+    if (!ex.isReps && !w) return;
+    const newS = ex.isReps ? calcRepsScore(r, ex.s) : calcScore(w, r, ex.s);
+    const old  = prs[ex.id];
+    const oldS = old ? getExScore(ex, old) : -1;
+    setPrs(p => ({ ...p, [ex.id]: { weight:w, reps:r, date:todayISO() } }));
+    setEditing(null); setWeight(""); setReps("");
+    if (newS > oldS) { setFlashId(ex.id); setTimeout(() => setFlashId(null), 600); }
+  };
+
+  return (
+    <div className="scroll fi">
+      <div className="card" style={{ marginBottom:14, background:"linear-gradient(135deg,rgba(56,189,248,.07),rgba(0,0,0,0))" }}>
+        <div className="h2" style={{ marginBottom:4 }}>Personal Records</div>
+        <div style={{ fontSize:14, color:"var(--text2)" }}>
+          Standards from <strong style={{ color:"var(--acc)" }}>strengthlevel.de</strong> — millions of real lifters.
+        </div>
+      </div>
+
+      <div className="fbar">
+        {["All",...MUSCLES].map(m => (
+          <button key={m} className={`fpill ${filter===m?"active":""}`} onClick={() => setFilter(m)}>{m}</button>
+        ))}
+      </div>
+
+      {filtered.map(ex => {
+        const pr    = prs[ex.id];
+        const score = pr ? getExScore(ex, pr) : 0;
+        const rank  = getRank(score);
+        const isOpen  = editing === ex.id;
+        const isFlash = flashId === ex.id;
+        const hist    = (prHistory[ex.id] || []).slice(-5);
+
+        const preview = isOpen
+          ? (ex.isReps
+              ? calcRepsScore(Number(reps)||0, ex.s)
+              : (weight && reps ? calcScore(Number(weight), Number(reps), ex.s) : null))
+          : null;
+
+        const improvement = pr && hist.length >= 2
+          ? (() => {
+              const first = hist[0];
+              const firstS = getExScore(ex, first);
+              const diff   = score - firstS;
+              return diff > 0 ? `+${Math.round(diff)} pts since first log` : null;
+            })()
+          : null;
+
+        return (
+          <div key={ex.id} className={`clist ${isFlash?"pop":""}`}
+            style={{ borderColor:pr ? rank.color+"28":"var(--bdr)", marginBottom:8 }}>
+            <div className="row" style={{ cursor:"pointer" }} onClick={() => isOpen ? setEditing(null) : startEdit(ex)}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:600, fontSize:15, color:"#fff" }}>{ex.name}</div>
+                <div style={{ fontSize:12, color:"var(--muted)", marginTop:1 }}>{ex.muscle}</div>
+                {pr && (
+                  <div style={{ marginTop:4, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                    <Badge score={score} />
+                    <span style={{ fontSize:11, color:"var(--muted)" }}>Top {scoreToTopPct(score)}%</span>
+                    {improvement && <span style={{ fontSize:11, color:"var(--grn)" }}>{improvement}</span>}
+                  </div>
+                )}
+                {/* sparkline */}
+                {hist.length >= 2 && (
+                  <div className="sparkline" style={{ height:24, marginTop:6 }}>
+                    {hist.map((h, i) => {
+                      const s = getExScore(ex, h);
+                      const max = Math.max(...hist.map(hh => getExScore(ex, hh)), 1);
+                      return <div key={i} className="spark-bar" style={{ height:`${(s/max)*100}%`, background:rank.color+"88" }} />;
+                    })}
+                    <span style={{ fontSize:10, color:"var(--muted)", marginLeft:4, alignSelf:"flex-end" }}>history</span>
+                  </div>
+                )}
+              </div>
+              <div style={{ textAlign:"right", marginRight:12 }}>
+                {pr ? (
+                  ex.isReps
+                    ? <div style={{ fontFamily:"var(--head)", fontSize:20, fontWeight:700, color:rank.color }}>{pr.reps} reps</div>
+                    : <div style={{ fontFamily:"var(--head)", fontSize:20, fontWeight:700, color:rank.color }}>{pr.weight} kg × {pr.reps}</div>
+                ) : <span style={{ fontSize:13, color:"var(--muted)" }}>No PR</span>}
+                {pr && <div style={{ fontFamily:"var(--head)", fontSize:13, color:"var(--muted)" }}>Score {score}</div>}
+              </div>
+              <div style={{ color:"var(--muted)", fontSize:14 }}>{isOpen?"▲":"▼"}</div>
+            </div>
+
+            {isOpen && (
+              <div style={{ padding:"0 16px 16px" }}>
+                <div className="note"><span className="note-i">ℹ</span><span>{ex.note}</span></div>
+                <div style={{ height:12 }} />
+
+                {ex.isReps ? (
+                  <div className="fg">
+                    <label className="flbl">Reps (bodyweight)</label>
+                    <input className="finp" type="number" value={reps} onChange={e=>setReps(e.target.value)} placeholder="e.g. 10" />
+                  </div>
+                ) : (
+                  <div className="fr2" style={{ marginBottom:12 }}>
+                    <div><label className="flbl">Weight (kg)</label><input className="finp" type="number" value={weight} onChange={e=>setWeight(e.target.value)} placeholder="e.g. 80" /></div>
+                    <div><label className="flbl">Reps</label><input className="finp" type="number" value={reps} onChange={e=>setReps(e.target.value)} placeholder="e.g. 5" /></div>
+                  </div>
+                )}
+
+                {preview !== null && (
+                  <div className="hint" style={{ marginBottom:12 }}>
+                    Estimated rank: <strong style={{ color:getRank(preview).color }}>{getRank(preview).name}</strong>
+                    {" · "}Score: <strong style={{ color:getRank(preview).color }}>{Math.round(preview)}</strong>
+                    {" · "}Top: <strong style={{ color:getRank(preview).color }}>{scoreToTopPct(preview)}%</strong>
+                    <br />Reference: Novice {ex.isReps ? ex.s.nov+" reps" : ex.s.nov+" kg"} · Advanced {ex.isReps ? ex.s.adv+" reps" : ex.s.adv+" kg"} · Elite {ex.isReps ? ex.s.eli+" reps" : ex.s.eli+" kg"}
+                  </div>
+                )}
+                <button className="btn" style={{ fontSize:13 }} onClick={() => save(ex)}>Save PR</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════  PR CELEBRATION MODAL  */
+function PRModal({ newPRs, onClose }) {
+  if (!newPRs || newPRs.length === 0) return null;
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:1000,
+      background:"rgba(0,0,0,0.75)", backdropFilter:"blur(4px)",
+      display:"flex", alignItems:"center", justifyContent:"center", padding:20,
+    }}>
+      <div style={{
+        background:"var(--surf)", border:"1px solid rgba(251,191,36,0.4)",
+        borderRadius:16, padding:"28px 24px", maxWidth:380, width:"100%",
+        boxShadow:"0 0 60px rgba(251,191,36,0.15)",
+        animation:"popIn .35s cubic-bezier(0.175,0.885,0.32,1.275)",
+      }}>
+        {/* Fireworks header */}
+        <div style={{ textAlign:"center", marginBottom:20 }}>
+          <div style={{ fontSize:52, lineHeight:1, marginBottom:8 }}>🏆</div>
+          <div style={{
+            fontFamily:"var(--head)", fontSize:28, fontWeight:800,
+            color:"var(--gld)", letterSpacing:1, marginBottom:4,
+          }}>
+            {newPRs.length === 1 ? "New Personal Record!" : `${newPRs.length} New Records!`}
+          </div>
+          <div style={{ fontSize:14, color:"var(--text2)" }}>
+            You crushed it today. Keep going! 💪
+          </div>
+        </div>
+
+        {/* PR list */}
+        <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
+          {newPRs.map((pr, i) => {
+            const r = getRank(pr.newScore);
+            const improved = pr.oldScore > 0;
+            return (
+              <div key={i} style={{
+                background:`linear-gradient(135deg, ${r.bg}, rgba(0,0,0,0))`,
+                border:`1px solid ${r.color}40`,
+                borderRadius:10, padding:"12px 14px",
+              }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                  <div>
+                    <div style={{ fontWeight:600, fontSize:15, color:"#fff", marginBottom:3 }}>{pr.name}</div>
+                    <div style={{ fontFamily:"var(--head)", fontSize:20, fontWeight:800, color:r.color }}>
+                      {pr.isReps ? `${pr.reps} reps` : `${pr.weight} kg × ${pr.reps}`}
+                    </div>
+                    {!pr.isReps && (
+                      <div style={{ fontSize:12, color:"var(--muted)", marginTop:2 }}>
+                        Est. 1RM: {Math.round(epley1RM(pr.weight, pr.reps))} kg
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <span className="badge" style={{ color:r.color, borderColor:r.color+"44", background:r.bg }}>
+                      {r.name}
+                    </span>
+                    {improved && (
+                      <div style={{ fontSize:12, color:"var(--grn)", marginTop:4 }}>
+                        +{Math.round(pr.newScore - pr.oldScore)} pts
+                      </div>
+                    )}
+                    {!improved && (
+                      <div style={{ fontSize:12, color:"var(--gld)", marginTop:4 }}>First PR!</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <button className="btn" onClick={onClose}>
+          Back to Log
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════  TRAINING LOG  */
+function LogTab({ sessions, setSessions, prs, setPrs }) {
+  const [view, setView]       = useState("list");
+  const [expanded, setExp]    = useState(null);
+  const [sDate, setDate]      = useState(todayISO());
+  const [sNote, setNote]      = useState("");
+  const [entries, setEnt]     = useState([{ exId: ALL_EX[0].id, sets:[{weight:"",reps:""}] }]);
+  const [celebPRs, setCelebPRs] = useState(null); // null = hidden, array = show modal
+
+  const addEntry   = () => setEnt(p=>[...p,{exId:ALL_EX[0].id,sets:[{weight:"",reps:""}]}]);
+  const rmEntry    = i  => setEnt(p=>p.filter((_,j)=>j!==i));
+  const setEx      = (i,v)    => setEnt(p=>p.map((e,j)=>j===i?{...e,exId:v}:e));
+  const addSet     = i        => setEnt(p=>p.map((e,j)=>j===i?{...e,sets:[...e.sets,{weight:"",reps:""}]}:e));
+  const rmSet      = (i,s)    => setEnt(p=>p.map((e,j)=>j===i?{...e,sets:e.sets.filter((_,k)=>k!==s)}:e));
+  const updSet     = (i,s,f,v)=> setEnt(p=>p.map((e,j)=>j===i?{...e,sets:e.sets.map((st,k)=>k===s?{...st,[f]:v}:st)}:e));
+
+  // Compute the best set score for a given entry's sets against the exercise definition
+  const bestSetScore = (entry) => {
+    const ex = ALL_EX.find(x => x.id === entry.exId);
+    if (!ex) return 0;
+    return entry.sets.reduce((best, set) => {
+      const w = Number(set.weight) || 0;
+      const r = Number(set.reps)   || 0;
+      if (!r) return best;
+      const s = ex.isReps ? calcRepsScore(r, ex.s) : calcScore(w, r, ex.s);
+      return s > best ? s : best;
+    }, 0);
+  };
+
+  // Compute the best single set (weight+reps) for an entry — highest estimated 1RM
+  const bestSet = (entry) => {
+    const ex = ALL_EX.find(x => x.id === entry.exId);
+    if (!ex) return null;
+    let best = null, bestVal = -1;
+    for (const set of entry.sets) {
+      const w = Number(set.weight) || 0;
+      const r = Number(set.reps)   || 0;
+      if (!r) continue;
+      const val = ex.isReps ? r : epley1RM(w, r);
+      if (val > bestVal) { bestVal = val; best = { weight:w, reps:r }; }
+    }
+    return best;
+  };
+
+  // Is a particular set a PR for this exercise?
+  const isSetPR = (exId, weight, reps) => {
+    const ex = ALL_EX.find(x => x.id === exId);
+    if (!ex || !reps) return false;
+    const existingPR = prs[exId];
+    const newScore   = ex.isReps ? calcRepsScore(reps, ex.s) : calcScore(weight, reps, ex.s);
+    const oldScore   = existingPR ? getExScore(ex, existingPR) : 0;
+    return newScore > oldScore;
+  };
+
+  const save = () => {
+    const clean = entries.map(en => {
+      const ex   = ALL_EX.find(x => x.id === en.exId);
+      const sets = en.sets.filter(s => s.reps).map(s => ({
+        weight: Number(s.weight) || 0,
+        reps:   Number(s.reps),
+      }));
+      return sets.length ? { exId:en.exId, name:ex.name, muscle:ex.muscle, sets } : null;
+    }).filter(Boolean);
+    if (!clean.length) return;
+
+    // ── Detect & save new PRs ──────────────────────────────────────────
+    const newPRsList = [];
+    const updatedPRs = { ...prs };
+
+    for (const entry of clean) {
+      const ex = ALL_EX.find(x => x.id === entry.exId);
+      if (!ex) continue;
+
+      // Find the best set in this session entry (highest e1RM / most reps)
+      let bestW = 0, bestR = 0, bestVal = -1;
+      for (const set of entry.sets) {
+        const w = set.weight, r = set.reps;
+        const val = ex.isReps ? r : epley1RM(w, r);
+        if (val > bestVal) { bestVal = val; bestW = w; bestR = r; }
+      }
+      if (!bestR) continue;
+
+      const newScore = ex.isReps ? calcRepsScore(bestR, ex.s) : calcScore(bestW, bestR, ex.s);
+      const existingPR = updatedPRs[ex.id];
+      const oldScore   = existingPR ? getExScore(ex, existingPR) : 0;
+
+      if (newScore > oldScore) {
+        // This is a new PR — save it automatically with today's date
+        updatedPRs[ex.id] = { weight: bestW, reps: bestR, date: sDate };
+        newPRsList.push({
+          id:       ex.id,
+          name:     ex.name,
+          muscle:   ex.muscle,
+          isReps:   !!ex.isReps,
+          weight:   bestW,
+          reps:     bestR,
+          newScore,
+          oldScore,
+        });
+      }
+    }
+
+    if (newPRsList.length > 0) {
+      setPrs(updatedPRs);
+    }
+    // ──────────────────────────────────────────────────────────────────
+
+    const totalVol  = clean.reduce((s,e) => s + e.sets.reduce((ss,st) => ss + st.weight * st.reps, 0), 0);
+    const totalSets = clean.reduce((s,e) => s + e.sets.length, 0);
+
+    // Tag session with which exercises set new PRs
+    const prExIds = new Set(newPRsList.map(p => p.id));
+    setSessions(prev => [{
+      id:       Date.now(),
+      date:     sDate,
+      note:     sNote,
+      exercises: clean,
+      totalVol,
+      totalSets,
+      newPRIds: [...prExIds],   // stored so the session card can show PR badges
+    }, ...prev]);
+
+    // Reset form state
+    setDate(todayISO()); setNote("");
+    setEnt([{ exId: ALL_EX[0].id, sets:[{weight:"",reps:""}] }]);
+
+    // Show modal if there are new PRs, otherwise go straight to list
+    if (newPRsList.length > 0) {
+      setCelebPRs(newPRsList);
+      setView("list");
+    } else {
+      setView("list");
+    }
+  };
+
+  if (view === "add") return (
+    <div className="scroll fi">
+      <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
+        <button className="btn-g" onClick={()=>setView("list")}>← Back</button>
+        <div className="h2">New Session</div>
+      </div>
+      <div className="fr2" style={{ marginBottom:12 }}>
+        <div className="fg"><label className="flbl">Date</label><input className="finp" type="date" value={sDate} onChange={e=>setDate(e.target.value)} /></div>
+        <div className="fg"><label className="flbl">Label (optional)</label><input className="finp" value={sNote} onChange={e=>setNote(e.target.value)} placeholder="e.g. Push Day" /></div>
+      </div>
+      <Lbl>Exercises</Lbl>
+      {entries.map((entry, ei) => {
+        const ex = ALL_EX.find(x => x.id === entry.exId);
+        // Check if any set in this entry is a live PR
+        const liveSetPRFlags = entry.sets.map(set => {
+          const w = Number(set.weight) || 0;
+          const r = Number(set.reps)   || 0;
+          return r > 0 && isSetPR(entry.exId, w, r);
+        });
+        const anyLivePR = liveSetPRFlags.some(Boolean);
+
+        return (
+          <div key={ei} style={{
+            background:"var(--bg)", borderRadius:8, padding:12, marginBottom:8,
+            border: anyLivePR
+              ? "1px solid rgba(251,191,36,0.5)"
+              : "1px solid var(--bdr)",
+            transition:"border-color .3s",
+          }}>
+            <div style={{ display:"flex",gap:8,alignItems:"center",marginBottom:8 }}>
+              <select className="fsel" style={{ flex:1 }} value={entry.exId} onChange={e => setEx(ei, e.target.value)}>
+                {MUSCLES.map(m => (
+                  <optgroup key={m} label={m}>
+                    {EX[m].map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+              <button className="btn-i" onClick={() => rmEntry(ei)}>✕</button>
+            </div>
+
+            {/* Exercise hint */}
+            {ex && <div style={{ fontSize:12,color:"var(--text2)",marginBottom:10,paddingLeft:2 }}>ℹ {ex.note}</div>}
+
+            {/* Live PR banner — shown as soon as any set beats the current PR */}
+            {anyLivePR && (
+              <div style={{
+                display:"flex", alignItems:"center", gap:8,
+                background:"rgba(251,191,36,0.1)", border:"1px solid rgba(251,191,36,0.35)",
+                borderRadius:7, padding:"8px 12px", marginBottom:10,
+                animation:"fadeUp .25s ease",
+              }}>
+                <span style={{ fontSize:20 }}>🏆</span>
+                <div>
+                  <div style={{ fontFamily:"var(--head)", fontSize:14, fontWeight:700, color:"var(--gld)" }}>
+                    New Personal Record!
+                  </div>
+                  <div style={{ fontSize:12, color:"var(--text2)" }}>
+                    This set beats your previous best — it will be saved automatically.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sets */}
+            {entry.sets.map((set, si) => {
+              const w   = Number(set.weight) || 0;
+              const r   = Number(set.reps)   || 0;
+              const isPR = r > 0 && isSetPR(entry.exId, w, r);
+              return (
+                <div key={si} style={{ display:"flex",gap:8,alignItems:"center",marginBottom:6 }}>
+                  <div style={{
+                    fontSize:12, width:18, textAlign:"center", flexShrink:0,
+                    color: isPR ? "var(--gld)" : "var(--muted)",
+                    fontWeight: isPR ? 700 : 400,
+                  }}>
+                    {isPR ? "★" : si + 1}
+                  </div>
+                  {!ex?.isReps && (
+                    <input
+                      className="finp" type="number"
+                      value={set.weight}
+                      onChange={e => updSet(ei, si, "weight", e.target.value)}
+                      placeholder="kg"
+                      style={{ flex:1, borderColor: isPR ? "rgba(251,191,36,0.5)" : undefined }}
+                    />
+                  )}
+                  <input
+                    className="finp" type="number"
+                    value={set.reps}
+                    onChange={e => updSet(ei, si, "reps", e.target.value)}
+                    placeholder="reps"
+                    style={{ flex:1, borderColor: isPR ? "rgba(251,191,36,0.5)" : undefined }}
+                  />
+                  <button className="btn-i" onClick={() => rmSet(ei, si)} style={{ flexShrink:0 }}>−</button>
+                </div>
+              );
+            })}
+            <button className="btn-i" style={{ fontSize:12,width:"100%",marginTop:4 }} onClick={() => addSet(ei)}>+ Set</button>
+          </div>
+        );
+      })}
+      <button className="btn-g" style={{ width:"100%",marginBottom:10,marginTop:4 }} onClick={addEntry}>+ Add Exercise</button>
+      <button className="btn" onClick={save}>Save Session</button>
+    </div>
+  );
+
+  return (
+    <>
+      {/* PR Celebration Modal */}
+      {celebPRs && (
+        <PRModal
+          newPRs={celebPRs}
+          onClose={() => setCelebPRs(null)}
+        />
+      )}
+
+      <div className="scroll fi">
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16 }}>
+          <div className="h2">Training Log</div>
+          <button className="btn" style={{ width:"auto",padding:"9px 18px",fontSize:13 }} onClick={()=>setView("add")}>+ New Session</button>
+        </div>
+
+        {sessions.length === 0 ? (
+          <div className="empty"><span className="empty-i">📋</span>No sessions yet.<br />Tap <strong style={{ color:"var(--acc)" }}>New Session</strong> to start.</div>
+        ) : sessions.map(s => {
+          const hasPRs = s.newPRIds && s.newPRIds.length > 0;
+          return (
+            <div key={s.id} className="sess" style={{ borderColor: hasPRs ? "rgba(251,191,36,0.3)" : undefined }}>
+              <div className="sess-h" onClick={()=>setExp(expanded===s.id?null:s.id)}>
+                <div style={{ flex:1 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ fontFamily:"var(--head)",fontSize:17,fontWeight:700,color:"#fff" }}>
+                      {s.note || "Workout"}
+                    </div>
+                    {hasPRs && (
+                      <div style={{
+                        fontFamily:"var(--head)", fontSize:11, fontWeight:700,
+                        color:"var(--gld)", background:"rgba(251,191,36,0.12)",
+                        border:"1px solid rgba(251,191,36,0.35)",
+                        borderRadius:20, padding:"2px 8px", letterSpacing:"0.5px",
+                      }}>
+                        🏆 {s.newPRIds.length} PR{s.newPRIds.length > 1 ? "s" : ""}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontSize:12,color:"var(--muted)",marginTop:2 }}>
+                    {fmtDate(s.date)} · {s.exercises.length} exercises · {s.totalSets} sets
+                  </div>
+                </div>
+                <div style={{ textAlign:"right", marginLeft:8 }}>
+                  <div style={{ fontFamily:"var(--head)",fontSize:16,fontWeight:700,color:"var(--acc)" }}>
+                    {s.totalVol>=1000 ? (s.totalVol/1000).toFixed(1)+"t" : s.totalVol+" kg"}
+                  </div>
+                  <div style={{ fontSize:11,color:"var(--muted)" }}>volume</div>
+                </div>
+              </div>
+
+              {expanded === s.id && (
+                <div className="sess-b">
+                  {s.exercises.map((e, i) => {
+                    const isPREx = s.newPRIds && s.newPRIds.includes(e.exId);
+                    return (
+                      <div key={i} className="sess-row" style={{ borderColor: isPREx ? "rgba(251,191,36,0.2)" : undefined }}>
+                        <div>
+                          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                            <div style={{ fontWeight:600 }}>{e.name}</div>
+                            {isPREx && <span style={{ fontSize:13 }}>🏆</span>}
+                          </div>
+                          <div style={{ fontSize:12,color:"var(--muted)" }}>{e.muscle}</div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          {e.sets.map((st,si)=>(
+                            <div key={si} style={{ fontSize:13 }}>
+                              {st.weight > 0 ? `${st.weight} kg × ${st.reps}` : `${st.reps} reps`}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button className="btn-d" style={{ marginTop:10 }}
+                    onClick={() => setSessions(p => p.filter(x => x.id !== s.id))}>
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════  STATS TAB  */
+function StatsTab({ sessions, prs }) {
+  const hasSessions = sessions.length > 0;
+  const hasPRs      = Object.keys(prs).length > 0;
+
+  const stats = useMemo(() => {
+    if (!hasSessions) return null;
+    const sorted   = [...sessions].sort((a,b)=>a.date.localeCompare(b.date));
+    const total    = sessions.length;
+    const totalVol = sessions.reduce((s,x)=>s+x.totalVol,0);
+    const totalSets= sessions.reduce((s,x)=>s+x.totalSets,0);
+    const avgVol   = Math.round(totalVol/total);
+
+    // Streak
+    const dateSet = new Set(sessions.map(s=>s.date));
+    let streak=0;
+    for(let i=0;i<365;i++){
+      const d=new Date(); d.setDate(d.getDate()-i);
+      const iso=d.toISOString().slice(0,10);
+      if(dateSet.has(iso)) streak++; else if(i>0) break;
+    }
+    // Best streak ever
+    const allDates = [...dateSet].sort();
+    let bestStreak=0, cur=0;
+    for(let i=0;i<allDates.length;i++){
+      if(i===0){ cur=1; continue; }
+      const prev=new Date(allDates[i-1]+"T00:00:00");
+      const this_=new Date(allDates[i]+"T00:00:00");
+      const diff=(this_-prev)/86400000;
+      if(diff===1) cur++; else cur=1;
+      if(cur>bestStreak) bestStreak=cur;
+    }
+    bestStreak=Math.max(bestStreak,streak);
+
+    // Monthly sessions (last 6 months)
+    const months=[];
+    for(let i=5;i>=0;i--){
+      const d=new Date(); d.setMonth(d.getMonth()-i);
+      const key=d.toISOString().slice(0,7);
+      const lbl=d.toLocaleDateString("en-US",{month:"short"});
+      months.push({ key, lbl, count:sessions.filter(s=>s.date.startsWith(key)).length });
+    }
+
+    const daysSince=Math.max(1,Math.ceil((new Date()-new Date(sorted[0].date+"T00:00:00"))/86400000));
+    const avgPerWeek=(total/Math.max(1,daysSince/7)).toFixed(1);
+    const consistency=Math.min(100,Math.round((total/daysSince)*7*25));
+
+    // Volume over last 6 months
+    const volByMonth=months.map(m=>({
+      ...m,
+      vol:sessions.filter(s=>s.date.startsWith(m.key)).reduce((s,x)=>s+x.totalVol,0)
+    }));
+
+    // Muscle volume
+    const muscleVol={};
+    sessions.forEach(s=>s.exercises.forEach(e=>{
+      const vol=e.sets.reduce((s,st)=>s+st.weight*st.reps,0);
+      muscleVol[e.muscle]=(muscleVol[e.muscle]||0)+vol;
+    }));
+    const topMuscles=Object.entries(muscleVol).sort((a,b)=>b[1]-a[1]);
+
+    // Exercise frequency
+    const exFreq={};
+    sessions.forEach(s=>s.exercises.forEach(e=>{exFreq[e.name]=(exFreq[e.name]||0)+1;}));
+    const topEx=Object.entries(exFreq).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+    // PR count by muscle
+    const prByMuscle=MUSCLES.reduce((acc,m)=>({...acc,[m]:EX[m].filter(e=>prs[e.id]).length}),{});
+
+    return { total,totalVol,totalSets,avgVol,streak,bestStreak,months,avgPerWeek,consistency,volByMonth,topMuscles,topEx,prByMuscle,daysSince };
+  }, [sessions, prs]);
+
+  // Muscle balance
+  const muscleBalance = useMemo(() => {
+    return MUSCLES.map(m => ({
+      muscle:m,
+      score: getMuscleScore(m, prs),
+      prCount: EX[m].filter(e => prs[e.id]).length,
+      total: EX[m].length,
+    }));
+  }, [prs]);
+
+  const overallScore = useMemo(() => {
+    const f = muscleBalance.filter(m => m.score > 0);
+    return f.length ? Math.round(f.reduce((s,m) => s+m.score, 0) / f.length) : 0;
+  }, [muscleBalance]);
+
+  // Top PRs
+  const topPRs = useMemo(() => {
+    return ALL_EX.filter(e=>prs[e.id])
+      .map(e => { const pr=prs[e.id]; const score=getExScore(e,pr); return {...e,pr,score}; })
+      .sort((a,b)=>b.score-a.score).slice(0,6);
+  }, [prs]);
+
+  const COLORS=["var(--acc)","var(--grn)","var(--gld)","#a855f7","var(--red)","#f97316"];
+
+  if (!hasSessions && !hasPRs) {
+    return (
+      <div className="scroll fi">
+        <div className="empty"><span className="empty-i">📊</span>No data yet.<br />Log sessions and set PRs to see your statistics.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="scroll fi">
+      {/* Overall rank highlight */}
+      {overallScore > 0 && (
+        <div className="card" style={{ marginBottom:14, background:`linear-gradient(135deg, ${getRank(overallScore).bg}, rgba(0,0,0,0))`, borderColor:getRank(overallScore).color+"30", textAlign:"center" }}>
+          <div style={{ fontFamily:"var(--head)", fontSize:13, letterSpacing:2, color:"var(--muted)", marginBottom:4 }}>OVERALL RANK</div>
+          <div style={{ fontFamily:"var(--head)", fontSize:48, fontWeight:800, color:getRank(overallScore).color, lineHeight:1 }}>{overallScore}</div>
+          <div style={{ fontFamily:"var(--head)", fontSize:18, fontWeight:700, color:getRank(overallScore).color, marginBottom:8 }}>{getRank(overallScore).name}</div>
+          <div style={{ display:"flex", justifyContent:"center", gap:8 }}>
+            <div className="top-pct" style={{ background:`${getRank(overallScore).color}18`, border:`1px solid ${getRank(overallScore).color}44`, color:getRank(overallScore).color }}>
+              Top {scoreToTopPct(overallScore)}% worldwide
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stats && (
+        <>
+          {/* Streak */}
+          <div className="streak">
+            <div className="streak-n">{stats.streak}</div>
+            <div>
+              <div style={{ fontFamily:"var(--head)", fontSize:20, fontWeight:700, color:"#fff", marginBottom:2 }}>Day Streak 🔥</div>
+              <div style={{ fontSize:14, color:"var(--text2)" }}>Best ever: {stats.bestStreak} days</div>
+            </div>
+          </div>
+
+          {/* Key metrics */}
+          <div className="sg3">
+            <div className="sbox"><div className="sval">{stats.total}</div><div className="slbl">Sessions</div></div>
+            <div className="sbox"><div className="sval">{stats.avgPerWeek}</div><div className="slbl">Per Week</div></div>
+            <div className="sbox"><div className="sval">{Object.keys(prs).length}</div><div className="slbl">PRs Set</div></div>
+          </div>
+
+          <div className="sg2">
+            <div className="sbox">
+              <div className="sval" style={{ fontSize:22 }}>{stats.totalVol>=1000?(stats.totalVol/1000).toFixed(1):stats.totalVol}<span className="sunit">{stats.totalVol>=1000?"t":"kg"}</span></div>
+              <div className="slbl">Total Volume</div>
+            </div>
+            <div className="sbox">
+              <div className="sval" style={{ fontSize:22 }}>{stats.consistency}<span className="sunit">%</span></div>
+              <div className="slbl">Consistency</div>
+            </div>
+          </div>
+
+          <div className="sg2">
+            <div className="sbox">
+              <div className="sval" style={{ fontSize:22 }}>{stats.avgVol>=1000?(stats.avgVol/1000).toFixed(1):stats.avgVol}<span className="sunit">{stats.avgVol>=1000?"t":"kg"}</span></div>
+              <div className="slbl">Avg Vol/Session</div>
+            </div>
+            <div className="sbox">
+              <div className="sval" style={{ fontSize:22 }}>{Math.round(stats.totalSets/stats.total)}</div>
+              <div className="slbl">Avg Sets/Session</div>
+            </div>
+          </div>
+
+          {/* Sessions per month bar chart */}
+          <Lbl>Sessions per Month</Lbl>
+          <div className="card">
+            <div className="vchart" style={{ height:90 }}>
+              {stats.months.map(m => {
+                const max = Math.max(...stats.months.map(x=>x.count), 1);
+                return (
+                  <div key={m.key} className="vbw">
+                    <div className="vb" style={{ height:`${(m.count/max)*74}px`, background:m.count>0?"linear-gradient(180deg,var(--acc),rgba(56,189,248,.3))":"var(--bdr)" }} />
+                    <div className="vl">{m.lbl}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:12, color:"var(--muted)", marginTop:10, textAlign:"center" }}>
+              {stats.avgPerWeek} sessions/week · {stats.totalSets} total sets · {stats.daysSince} days active
+            </div>
+          </div>
+
+          {/* Volume per month */}
+          <Lbl>Monthly Volume (kg)</Lbl>
+          <div className="card">
+            <div className="vchart" style={{ height:90 }}>
+              {stats.volByMonth.map(m => {
+                const max = Math.max(...stats.volByMonth.map(x=>x.vol), 1);
+                return (
+                  <div key={m.key} className="vbw">
+                    <div className="vb" style={{ height:`${(m.vol/max)*74}px`, background:m.vol>0?"linear-gradient(180deg,var(--grn),rgba(52,211,153,.3))":"var(--bdr)" }} />
+                    <div className="vl">{m.lbl}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:12, color:"var(--muted)", marginTop:10, textAlign:"center" }}>
+              Peak month: {Math.max(...stats.volByMonth.map(m=>m.vol)).toLocaleString()} kg
+            </div>
+          </div>
+
+          {/* Volume by muscle */}
+          {stats.topMuscles.length > 0 && (
+            <>
+              <Lbl>Volume by Muscle Group</Lbl>
+              <div className="clist">
+                {stats.topMuscles.map(([muscle,vol],i) => {
+                  const max=stats.topMuscles[0][1]; const c=COLORS[i]||"var(--muted)";
+                  return (
+                    <div key={muscle} className="row">
+                      <div style={{ width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13 }}>{i+1}</div>
+                      <div style={{ flex:1,marginLeft:10 }}>
+                        <div style={{ fontWeight:600,marginBottom:4 }}>{muscle}</div>
+                        <div style={{ height:4,background:"var(--bdr)",borderRadius:2,overflow:"hidden" }}>
+                          <div style={{ height:"100%",width:`${(vol/max)*100}%`,background:c,borderRadius:2 }} />
+                        </div>
+                      </div>
+                      <div style={{ fontFamily:"var(--head)",fontWeight:700,fontSize:15,color:c,marginLeft:10 }}>
+                        {vol>=1000?(vol/1000).toFixed(1)+"t":vol+" kg"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Top exercises */}
+          {stats.topEx.length > 0 && (
+            <>
+              <Lbl>Most Trained Exercises</Lbl>
+              <div className="clist">
+                {stats.topEx.map(([name,count],i) => (
+                  <div key={name} className="row">
+                    <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                      <div style={{ width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13 }}>{i+1}</div>
+                      <div style={{ fontWeight:600 }}>{name}</div>
+                    </div>
+                    <div style={{ fontFamily:"var(--head)",fontWeight:700,fontSize:14,color:"var(--acc)" }}>{count}× logged</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {/* Muscle Balance */}
+      <Lbl>Muscle Balance</Lbl>
+      <div className="card">
+        {muscleBalance.map(({muscle,score,prCount,total}) => {
+          const r = getRank(score);
+          return (
+            <div key={muscle} className="balance-item">
+              <div className="balance-label">{muscle}</div>
+              <div className="balance-track" style={{ flex:1 }}>
+                <div className="balance-fill" style={{ width:`${score}%`, background:r.color, boxShadow:`0 0 4px ${r.color}44` }} />
+              </div>
+              <div style={{ fontFamily:"var(--head)", fontSize:13, fontWeight:700, color:r.color, minWidth:30, textAlign:"right" }}>{score}</div>
+              <div style={{ fontSize:11, color:"var(--muted)", minWidth:36, textAlign:"right" }}>{prCount}/{total}</div>
+            </div>
+          );
+        })}
+        <div style={{ fontSize:12,color:"var(--text2)",marginTop:10,borderTop:"1px solid var(--bdr)",paddingTop:10 }}>
+          {(() => {
+            const scores = muscleBalance.filter(m=>m.score>0).map(m=>m.score);
+            if (scores.length < 2) return "Log more PRs across all muscle groups to see your balance.";
+            const avg = scores.reduce((s,x)=>s+x,0)/scores.length;
+            const max = Math.max(...scores), min = Math.min(...scores);
+            const diff = max - min;
+            if (diff < 20) return "✅ Your muscle development is well-balanced! Keep it up.";
+            if (diff < 40) return "⚠️ Slight imbalance detected. Focus on your weaker muscle groups.";
+            return "🔴 Significant imbalance. Prioritize your underdeveloped muscles to prevent injury.";
+          })()}
+        </div>
+      </div>
+
+      {/* Top PRs */}
+      {topPRs.length > 0 && (
+        <>
+          <Lbl>Top PRs by Score</Lbl>
+          <div className="clist">
+            {topPRs.map((ex,i) => {
+              const r=getRank(ex.score);
+              return (
+                <div key={ex.id} className="row">
+                  <div style={{ width:20,textAlign:"center",fontFamily:"var(--head)",fontWeight:700,color:"var(--muted)",fontSize:13 }}>{i+1}</div>
+                  <div style={{ flex:1,marginLeft:10 }}>
+                    <div style={{ fontWeight:600 }}>{ex.name}</div>
+                    <div style={{ fontSize:12,color:"var(--muted)" }}>{ex.muscle} · {fmtDate(ex.pr.date)}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontFamily:"var(--head)",fontWeight:700,color:r.color,fontSize:16 }}>
+                      {ex.isReps ? ex.pr.reps+" reps" : ex.pr.weight+" kg × "+ex.pr.reps}
+                    </div>
+                    <div style={{ display:"flex",gap:6,justifyContent:"flex-end",marginTop:2 }}>
+                      <Badge score={ex.score} />
+                      <span style={{ fontSize:11,color:"var(--muted)",alignSelf:"center" }}>Top {scoreToTopPct(ex.score)}%</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════  ACHIEVEMENTS TAB  */
+function AchievementsTab({ prs, sessions }) {
+  const overall = useMemo(() => {
+    const scores = MUSCLES.map(m => getMuscleScore(m, prs)).filter(s => s > 0);
+    return scores.length ? Math.round(scores.reduce((s,x) => s+x, 0) / scores.length) : 0;
+  }, [prs]);
+
+  const results = useMemo(() =>
+    ACHIEVEMENTS.map(a => ({ ...a, done: a.check(prs, sessions, overall) }))
+  , [prs, sessions, overall]);
+
+  const doneCount = results.filter(a => a.done).length;
+  const pct = Math.round((doneCount / ACHIEVEMENTS.length) * 100);
+
+  const fact = useMemo(() => FUN_FACTS[Math.floor(Date.now()/86400000) % FUN_FACTS.length], []);
+
+  return (
+    <div className="scroll fi">
+      {/* Header */}
+      <div className="card" style={{ marginBottom:14, background:"linear-gradient(135deg,rgba(251,191,36,.08),rgba(0,0,0,0))", borderColor:"rgba(251,191,36,.25)", textAlign:"center" }}>
+        <div style={{ fontFamily:"var(--head)", fontSize:40, lineHeight:1, marginBottom:8 }}>🏆</div>
+        <div className="h2" style={{ marginBottom:4 }}>Achievements</div>
+        <div style={{ fontSize:14, color:"var(--text2)", marginBottom:12 }}>
+          {doneCount} of {ACHIEVEMENTS.length} unlocked
+        </div>
+        <div className="bar-t" style={{ height:8 }}>
+          <div className="bar-f" style={{ width:`${pct}%`, background:"var(--gld)", boxShadow:"0 0 8px rgba(251,191,36,.5)" }} />
+        </div>
+        <div style={{ fontSize:12, color:"var(--muted)", marginTop:6 }}>{pct}% complete</div>
+      </div>
+
+      {/* Done */}
+      {results.filter(a => a.done).length > 0 && (
+        <>
+          <Lbl>Unlocked ({doneCount})</Lbl>
+          {results.filter(a => a.done).map(a => (
+            <div key={a.id} className="ach done">
+              <div className="ach-icon">{a.icon}</div>
+              <div style={{ flex:1 }}>
+                <div className="ach-title">{a.title}</div>
+                <div className="ach-desc">{a.desc}</div>
+              </div>
+              <div className="ach-done-badge">✓ DONE</div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* Locked */}
+      {results.filter(a => !a.done).length > 0 && (
+        <>
+          <Lbl>Locked ({ACHIEVEMENTS.length - doneCount})</Lbl>
+          {results.filter(a => !a.done).map(a => (
+            <div key={a.id} className="ach locked">
+              <div className="ach-icon">🔒</div>
+              <div style={{ flex:1 }}>
+                <div className="ach-title">{a.title}</div>
+                <div className="ach-desc">{a.desc}</div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* Fun fact at bottom */}
+      <Lbl>Did You Know?</Lbl>
+      <div className="fact" style={{ marginBottom:0 }}>
+        <span className="fact-i">{fact.icon}</span>
+        <span className="fact-t">{fact.text}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════  ROOT  */
+const TABS = [
+  { id:"dashboard",    label:"Home"    },
+  { id:"prs",          label:"PRs"     },
+  { id:"log",          label:"Log"     },
+  { id:"stats",        label:"Stats"   },
+  { id:"achievements", label:"Awards"  },
+];
+
+function IronRank() {
+  const [tab, setTab] = useState("dashboard");
+
+  // ── Persistent state via localStorage ──────────────────────────────
+  const load = (key, fallback) => {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch { return fallback; }
+  };
+  const [prs,       setPrsRaw]       = useState(() => load("ir_prs", {}));
+  const [sessions,  setSessionsRaw]  = useState(() => load("ir_sessions", []));
+  const [prHistory, setPRHistoryRaw] = useState(() => load("ir_prHistory", {}));
+
+  const setPrs = v => {
+    const next = typeof v === "function" ? v(prs) : v;
+    setPrsRaw(next);
+    try { localStorage.setItem("ir_prs", JSON.stringify(next)); } catch {}
+  };
+  const setSessions = v => {
+    const next = typeof v === "function" ? v(sessions) : v;
+    setSessionsRaw(next);
+    try { localStorage.setItem("ir_sessions", JSON.stringify(next)); } catch {}
+  };
+  const setPRHistory = v => {
+    const next = typeof v === "function" ? v(prHistory) : v;
+    setPRHistoryRaw(next);
+    try { localStorage.setItem("ir_prHistory", JSON.stringify(next)); } catch {}
+  };
+  // ───────────────────────────────────────────────────────────────────
+
+  // Track PR history whenever prs changes
+  useEffect(() => {
+    setPRHistory(prev => {
+      const next = { ...prev };
+      Object.entries(prs).forEach(([id, pr]) => {
+        if (!next[id]) next[id] = [];
+        const last = next[id][next[id].length - 1];
+        if (!last || last.weight !== pr.weight || last.reps !== pr.reps) {
+          next[id] = [...next[id].slice(-9), { ...pr }];
+        }
+      });
+      return next;
+    });
+  }, [prs]);
+
+  const prCount  = Object.keys(prs).length;
+  const sesCount = sessions.length;
+  const overallScore = useMemo(() => {
+    const scores = MUSCLES.map(m => getMuscleScore(m, prs)).filter(s => s > 0);
+    return scores.length ? Math.round(scores.reduce((s,x) => s+x, 0) / scores.length) : 0;
+  }, [prs]);
+  const newAchs = useMemo(() => ACHIEVEMENTS.filter(a => a.check(prs, sessions, overallScore)).length, [prs, sessions, overallScore]);
+
+  return (
+    <>
+      <style>{CSS}</style>
+      <div className="app">
+        <div className="hdr">
+          <div>
+            <div className="logo">IRON<em>RANK</em></div>
+            <div className="logo-sub">Strength Tracker</div>
+          </div>
+          <div className="hdr-stats">
+            <div><span>{prCount}</span> PRs · <span>{sesCount}</span> Sessions</div>
+            {newAchs > 0 && <div style={{ color:"var(--gld)" }}>🏆 {newAchs} achievements</div>}
+          </div>
+        </div>
+
+        <div className="nav">
+          {TABS.map(t => (
+            <button key={t.id} className={`nav-btn ${tab===t.id?"active":""}`} onClick={()=>setTab(t.id)}>
+              {t.label}
+              {t.id==="achievements" && newAchs > 0 && <span style={{ marginLeft:3, color:"var(--gld)" }}>•</span>}
+            </button>
+          ))}
+        </div>
+
+        {tab==="dashboard"    && <DashboardTab    prs={prs} sessions={sessions} onNavigate={setTab} />}
+        {tab==="prs"          && <PRsTab          prs={prs} setPrs={setPrs} prHistory={prHistory} />}
+        {tab==="log"          && <LogTab          sessions={sessions} setSessions={setSessions} prs={prs} setPrs={setPrs} />}
+        {tab==="stats"        && <StatsTab        sessions={sessions} prs={prs} />}
+        {tab==="achievements" && <AchievementsTab prs={prs} sessions={sessions} />}
+      </div>
+    </>
+  );
+}
