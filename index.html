@@ -516,10 +516,11 @@ function DashboardTab({ prs, sessions, onNavigate, userProfile }) {
         <span className="rnum" style={{color:rank.color,textShadow:`0 0 40px ${rank.color}55`}}>{overall}</span>
         <div className="rname" style={{color:rank.color}}>{rank.name}</div>
         {overall>0&&(
-          <div style={{display:"flex",justifyContent:"center",marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:12,gap:8,flexWrap:"wrap"}}>
             <div className="top-pct" style={{background:`${rank.color}18`,border:`1px solid ${rank.color}44`,color:rank.color}}>
               Top {topPct}% weltweit
             </div>
+            <button onClick={()=>onNavigate("help")} style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.15)",borderRadius:20,padding:"3px 10px",color:"var(--muted)",fontSize:11,cursor:"pointer",fontFamily:"var(--head)",fontWeight:600,letterSpacing:.5}}>❓ Was bedeutet das?</button>
           </div>
         )}
         {next?(
@@ -634,8 +635,12 @@ function DashboardTab({ prs, sessions, onNavigate, userProfile }) {
       {overall===0&&(
         <div style={{marginTop:10,background:"rgba(56,189,248,.05)",border:"1px solid rgba(56,189,248,.15)",borderRadius:10,padding:"24px 20px",textAlign:"center"}}>
           <div style={{fontSize:36,marginBottom:10}}>🏋️</div>
-          <div className="h2" style={{marginBottom:6}}>Erstes PR eintragen</div>
-          <div style={{fontSize:14,color:"var(--text2)"}}>Geh zum <strong style={{color:"var(--acc)"}}>PRs</strong>-Tab und trage deine besten Lifts ein, um deinen Stärke-Rang freizuschalten.</div>
+          <div className="h2" style={{marginBottom:6}}>Willkommen bei IronRank!</div>
+          <div style={{fontSize:14,color:"var(--text2)",marginBottom:14}}>Geh zum <strong style={{color:"var(--acc)"}}>PRs</strong>-Tab und trage deine besten Lifts ein, um deinen Stärke-Rang freizuschalten.</div>
+          <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+            <button className="btn" style={{width:"auto",padding:"9px 18px",fontSize:13}} onClick={()=>onNavigate("prs")}>⭐ PRs eintragen</button>
+            <button className="btn-g" style={{fontSize:13}} onClick={()=>onNavigate("help")}>❓ Anleitung</button>
+          </div>
         </div>
       )}
     </div>
@@ -714,11 +719,29 @@ function PRsTab({ prs, setPrs, prHistory, customExercises }) {
         </div>
       </div>
 
+      {Object.keys(prs).length===0&&(
+        <div style={{background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:10,padding:14,marginBottom:14}}>
+          <div style={{fontFamily:"var(--head)",fontSize:13,fontWeight:700,color:"var(--gld)",letterSpacing:1,marginBottom:8}}>👋 SO FUNKTIONIERT ES</div>
+          <div style={{fontSize:13,color:"var(--text2)",lineHeight:1.7}}>
+            1. Suche oder filtere eine Übung<br/>
+            2. Tippe darauf um sie aufzuklappen<br/>
+            3. Gib dein Gewicht &amp; Wiederholungen ein<br/>
+            4. Erhalte sofort deinen Rang verglichen mit Millionen Liftern 🏅
+          </div>
+        </div>
+      )}
+
       {/* Search */}
       <div className="search-wrap">
         <span className="search-icon">🔍</span>
         <input className="finp" type="text" placeholder="Übung suchen…" value={search} onChange={e=>setSearch(e.target.value)} style={{paddingLeft:36}} />
       </div>
+
+      {search.trim()&&filtered.length===0&&(
+        <div style={{background:"rgba(56,189,248,.06)",border:"1px solid rgba(56,189,248,.2)",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:13,color:"var(--text2)"}}>
+          💡 Übung nicht gefunden? Tippe auf <strong style={{color:"var(--acc)"}}>➕</strong> oben rechts um eigene Übungen hinzuzufügen.
+        </div>
+      )}
 
       <div className="fbar">
         {filterGroups.map(m=>(
@@ -726,7 +749,10 @@ function PRsTab({ prs, setPrs, prHistory, customExercises }) {
         ))}
       </div>
 
-      {filtered.length===0&&(
+      {filtered.length===0&&!search.trim()&&(
+        <div className="empty"><span className="empty-i">🔍</span>Keine Übungen in dieser Kategorie.</div>
+      )}
+      {filtered.length===0&&search.trim()&&(
         <div className="empty"><span className="empty-i">🔍</span>Keine Übungen gefunden.</div>
       )}
 
@@ -856,6 +882,7 @@ function PRsTab({ prs, setPrs, prHistory, customExercises }) {
                     Rang: <strong style={{color:getRank(preview).color}}>{getRank(preview).name}</strong>
                     {" · "}Score: <strong style={{color:getRank(preview).color}}>{Math.round(preview)}</strong>
                     {" · "}Top: <strong style={{color:getRank(preview).color}}>{scoreToTopPct(preview)}%</strong>
+                    {!ex.isReps&&weight&&reps&&<><br/><span style={{color:"var(--muted)"}}>Est. 1RM: {Math.round(epley1RM(Number(weight),Number(reps)))} kg</span> <span style={{fontSize:11,color:"var(--muted)"}}>· basiert auf Epley-Formel</span></>}
                     <br />Referenz: Novice {ex.isReps?ex.s.nov+" Wdh.":ex.s.nov+" kg"} · Advanced {ex.isReps?ex.s.adv+" Wdh.":ex.s.adv+" kg"} · Elite {ex.isReps?ex.s.eli+" Wdh.":ex.s.eli+" kg"}
                   </div>
                 )}
@@ -873,7 +900,7 @@ function PRsTab({ prs, setPrs, prHistory, customExercises }) {
                       <span>Unilateral ausführen (z.B. einarmig)</span>
                     </label>
                     <div style={{fontSize:12,color:"var(--muted)",marginTop:4}}>
-                      Markiert diese Übung als unilateral. Wirkt nur als Hinweis – die Gewichtswertung bleibt gleich.
+                      Markiert diese Übung als einseitig ausgeführt – z.B. einarmiges Rudern oder einbeinige Übungen. Nur als Erinnerung, die Score-Berechnung bleibt gleich.
                     </div>
                     {pr&&(
                       <button className="btn-d" style={{marginTop:10,width:"100%"}} onClick={()=>{if(window.confirm("PR löschen?"))deletePR(ex.id);}}>
@@ -1156,6 +1183,9 @@ function LogTab({ sessions, setSessions, prs, setPrs, userProfile, customExercis
         );
       })}
       <button className="btn-g" style={{width:"100%",marginBottom:10,marginTop:4}} onClick={addEntry}>+ Übung hinzufügen</button>
+      <div style={{fontSize:12,color:"var(--muted)",textAlign:"center",marginBottom:12,padding:"8px 12px",background:"var(--bg2)",borderRadius:8,border:"1px solid var(--bdr)"}}>
+        💡 Deine Übung nicht dabei? Tippe auf <strong style={{color:"var(--acc)"}}>➕</strong> oben rechts um eigene Übungen hinzuzufügen.
+      </div>
       <button className="btn" onClick={save}>Einheit speichern</button>
     </div>
   );
@@ -1172,7 +1202,12 @@ function LogTab({ sessions, setSessions, prs, setPrs, userProfile, customExercis
         </div>
 
         {sessions.length===0?(
-          <div className="empty"><span className="empty-i">📋</span>Noch keine Einheiten.<br />Tippe auf <strong style={{color:"var(--acc)"}}>Neue Einheit</strong> um zu starten.</div>
+          <div style={{textAlign:"center",padding:"30px 20px"}}>
+            <div style={{fontSize:42,marginBottom:12}}>📋</div>
+            <div className="h2" style={{marginBottom:8}}>Noch keine Einheiten</div>
+            <div style={{fontSize:14,color:"var(--text2)",marginBottom:16}}>Tippe auf <strong style={{color:"var(--acc)"}}>+ Neue Einheit</strong> um dein erstes Training zu starten. Alle Übungen, Sätze und Gewichte werden gespeichert – neue PRs werden automatisch erkannt!</div>
+            <button className="btn" style={{width:"auto",padding:"10px 22px"}} onClick={()=>setView("add")}>+ Erste Einheit starten</button>
+          </div>
         ):sessions.map(s=>{
           const hasPRs=s.newPRIds&&s.newPRIds.length>0;
           const cals=estimateCalories(s,userProfile?.weight||80);
@@ -1273,7 +1308,12 @@ function StatsTab({ sessions, prs, userProfile, bodyWeightLog }) {
   const COLORS=["var(--acc)","var(--grn)","var(--gld)","#a855f7","var(--red)","#f97316"];
 
   if (!hasSessions&&!hasPRs) return (
-    <div className="scroll fi"><div className="empty"><span className="empty-i">📊</span>Noch keine Daten.<br />Logge Einheiten und setze PRs um Statistiken zu sehen.</div></div>
+    <div className="scroll fi">
+      <div className="empty"><span className="empty-i">📊</span>Noch keine Daten.</div>
+      <div style={{background:"rgba(56,189,248,.05)",border:"1px solid rgba(56,189,248,.15)",borderRadius:10,padding:16,textAlign:"center",marginTop:8}}>
+        <div style={{fontSize:14,color:"var(--text2)",marginBottom:10}}>Trage PRs im <strong style={{color:"var(--acc)"}}>PRs-Tab</strong> ein und logge dein Training im <strong style={{color:"var(--grn)"}}>Log-Tab</strong> um detaillierte Statistiken zu sehen.</div>
+      </div>
+    </div>
   );
 
   return (
@@ -1493,7 +1533,8 @@ function AchievementsTab({ prs, sessions, customExercises, goals }) {
       <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,rgba(251,191,36,.08),rgba(0,0,0,0))",borderColor:"rgba(251,191,36,.25)",textAlign:"center"}}>
         <div style={{fontFamily:"var(--head)",fontSize:40,lineHeight:1,marginBottom:8}}>🏆</div>
         <div className="h2" style={{marginBottom:4}}>Achievements</div>
-        <div style={{fontSize:14,color:"var(--text2)",marginBottom:12}}>{doneCount} von {ACHIEVEMENTS.length} freigeschaltet</div>
+        <div style={{fontSize:14,color:"var(--text2)",marginBottom:4}}>{doneCount} von {ACHIEVEMENTS.length} freigeschaltet</div>
+        <div style={{fontSize:12,color:"var(--muted)",marginBottom:12}}>Werden automatisch freigeschaltet durch PRs, Training &amp; Meilensteine</div>
         <div className="bar-t" style={{height:8}}><div className="bar-f" style={{width:`${pct}%`,background:"var(--gld)",boxShadow:"0 0 8px rgba(251,191,36,.5)"}} /></div>
         <div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>{pct}% abgeschlossen</div>
       </div>
@@ -1514,6 +1555,7 @@ function AchievementsTab({ prs, sessions, customExercises, goals }) {
       {results.filter(a=>!a.done).length>0&&(
         <>
           <Lbl>Gesperrt ({ACHIEVEMENTS.length-doneCount})</Lbl>
+          <div style={{fontSize:12,color:"var(--muted)",marginBottom:10}}>Bedingung steht unter jedem Achievement.</div>
           {results.filter(a=>!a.done).map(a=>(
             <div key={a.id} className="ach locked">
               <div className="ach-icon">🔒</div>
@@ -1649,6 +1691,7 @@ function ProfileTab({ userProfile, setUserProfile, goals, setGoals, bodyWeightLo
       <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,rgba(168,85,247,.08),rgba(0,0,0,0))",borderColor:"rgba(168,85,247,.25)"}}>
         <div className="h2" style={{marginBottom:4}}>👤 Profil</div>
         <div style={{fontSize:14,color:"var(--text2)"}}>Deine Körperdaten für genauere Berechnungen.</div>
+        <div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>💡 Körpergewicht wird für Kalorienberechnungen &amp; Bodyweight-Vergleiche genutzt.</div>
       </div>
 
       {/* Body stats */}
@@ -1881,6 +1924,232 @@ function CustomExModal({ onAdd, onClose }) {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════  HELP TAB  */
+function HelpTab({ onNavigate }) {
+  const [open, setOpen] = useState(null);
+
+  const sections = [
+    {
+      id:"score",
+      icon:"🏅",
+      title:"Was ist der Score?",
+      color:"var(--acc)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}>Der <strong style={{color:"var(--acc)"}}>Score (0–100)</strong> zeigt wie stark du im Vergleich zu Millionen echten Liftern bist, basierend auf Daten von <strong>strengthlevel.de</strong>.</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            {[
+              {name:"Beginner",color:"#718096",pct:"Unter 20%",desc:"Einstiegsniveau"},
+              {name:"Novice",color:"#48bb78",pct:"20–39",desc:"Erste Fortschritte"},
+              {name:"Intermediate",color:"#4299e1",pct:"40–59",desc:"Besser als ~60% aller Gym-Besucher"},
+              {name:"Advanced",color:"#ecc94b",pct:"60–79",desc:"Deutlich überdurchschnittlich"},
+              {name:"Pro",color:"#ed8936",pct:"80–94",desc:"Top 10% weltweit"},
+              {name:"Elite",color:"#fc5c7d",pct:"95+",desc:"Weltklasse-Niveau"},
+            ].map(r=>(
+              <div key={r.name} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                <span style={{fontFamily:"var(--head)",fontWeight:700,color:r.color,minWidth:90,fontSize:13}}>{r.name}</span>
+                <span style={{fontSize:11,color:"var(--muted)",minWidth:40}}>{r.pct}</span>
+                <span style={{fontSize:12,color:"var(--text2)"}}>{r.desc}</span>
+              </div>
+            ))}
+          </div>
+          <p style={{fontSize:13,color:"var(--text2)"}}>💡 Der Gesamtscore ist der Durchschnitt deiner besten Muskelgruppe je Kategorie.</p>
+        </div>
+      )
+    },
+    {
+      id:"prs",
+      icon:"⭐",
+      title:"PRs – Persönliche Rekorde",
+      color:"var(--gld)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}>Im <strong style={{color:"var(--gld)"}}>PRs-Tab</strong> trägst du dein bestes Gewicht und die Wiederholungszahl für jede Übung ein.</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            <div style={{marginBottom:8,fontSize:13}}>📌 <strong>Für Gewichtsübungen</strong> (z.B. Bankdrücken): Gewicht in kg + Wiederholungen eingeben. Die App berechnet daraus deinen geschätzten <strong>1RM (Einwiederholungsmaximum)</strong>.</div>
+            <div style={{marginBottom:8,fontSize:13}}>📌 <strong>Für Körpergewichtsübungen</strong> (z.B. Klimmzüge): Nur die maximale Wiederholungszahl eingeben.</div>
+            <div style={{fontSize:13}}>📌 <strong>Kurzhantelübungen</strong>: Gewicht pro Kurzhantel eingeben (nicht Gesamtgewicht).</div>
+          </div>
+          <div style={{background:"rgba(251,191,36,.07)",border:"1px solid rgba(251,191,36,.2)",borderRadius:8,padding:10,fontSize:13,color:"var(--text2)"}}>
+            💡 Deine Übung nicht dabei? Tippe auf <strong style={{color:"var(--acc)"}}>➕</strong> oben rechts um eigene Übungen hinzuzufügen.
+          </div>
+        </div>
+      )
+    },
+    {
+      id:"log",
+      icon:"📋",
+      title:"Trainingslog",
+      color:"var(--grn)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}>Im <strong style={{color:"var(--grn)"}}>Log-Tab</strong> dokumentierst du deine kompletten Trainingseinheiten – alle Übungen, Sätze und Gewichte.</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            <div style={{marginBottom:8,fontSize:13}}>1️⃣ Tippe auf <strong>+ Neue Einheit</strong></div>
+            <div style={{marginBottom:8,fontSize:13}}>2️⃣ Gib Datum und Namen ein (z.B. "Push Day")</div>
+            <div style={{marginBottom:8,fontSize:13}}>3️⃣ Wähle deine Übungen aus dem Dropdown</div>
+            <div style={{marginBottom:8,fontSize:13}}>4️⃣ Füge Sätze hinzu mit <strong>+ Satz</strong></div>
+            <div style={{fontSize:13}}>5️⃣ Tippe auf <strong>Einheit speichern</strong> – neue PRs werden automatisch erkannt! 🏆</div>
+          </div>
+          <div style={{background:"rgba(52,211,153,.07)",border:"1px solid rgba(52,211,153,.2)",borderRadius:8,padding:10,fontSize:13,color:"var(--text2)"}}>
+            💡 Setzt du beim Training einen neuen PR, wird er live angezeigt (⭐ neben dem Satz) und nach dem Speichern automatisch in deine PRs übertragen.
+          </div>
+        </div>
+      )
+    },
+    {
+      id:"stats",
+      icon:"📊",
+      title:"Statistiken & Analyse",
+      color:"var(--purp)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}>Der <strong style={{color:"var(--purp)"}}>Stats-Tab</strong> zeigt deine Trainingshistorie und Fortschritte im Detail.</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            <div style={{marginBottom:8,fontSize:13}}>📈 <strong>Volumen</strong>: Gesamtgewicht × Wiederholungen aller Sätze</div>
+            <div style={{marginBottom:8,fontSize:13}}>🔥 <strong>Streak</strong>: Aufeinanderfolgende Trainingstage</div>
+            <div style={{marginBottom:8,fontSize:13}}>⚖️ <strong>Muskelbalance</strong>: Zeigt ob du ausgeglichen trainierst</div>
+            <div style={{fontSize:13}}>🔢 <strong>Kalorienverbrauch</strong>: Schätzung basierend auf Gewicht, Sätzen & Wiederholungen</div>
+          </div>
+          <div style={{background:"rgba(168,85,247,.07)",border:"1px solid rgba(168,85,247,.2)",borderRadius:8,padding:10,fontSize:13,color:"var(--text2)"}}>
+            💡 Je mehr PRs und Einheiten du einträgst, desto genauer werden deine Statistiken.
+          </div>
+        </div>
+      )
+    },
+    {
+      id:"achievements",
+      icon:"🏆",
+      title:"Achievements",
+      color:"var(--gld)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}>Im <strong style={{color:"var(--gld)"}}>Awards-Tab</strong> siehst du alle freischaltbaren Achievements.</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            <div style={{marginBottom:8,fontSize:13}}>✅ <strong>Grün/leuchtend</strong>: Bereits freigeschaltet</div>
+            <div style={{fontSize:13}}>🔒 <strong>Ausgegraut</strong>: Noch nicht erreicht – tippe drauf um die Bedingung zu sehen</div>
+          </div>
+          <p style={{fontSize:13,color:"var(--text2)"}}>Achievements werden automatisch freigeschaltet wenn du PRs setzt, Einheiten loggst oder bestimmte Meilensteine erreichst.</p>
+        </div>
+      )
+    },
+    {
+      id:"profile",
+      icon:"👤",
+      title:"Profil & Traumziele",
+      color:"var(--acc)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}>Im <strong style={{color:"var(--acc)"}}>Profil-Tab</strong> kannst du persönliche Daten und Ziele verwalten.</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            <div style={{marginBottom:8,fontSize:13}}>⚖️ <strong>Körpergewicht</strong>: Wird für genauere Kalorienberechnungen und Bodyweight-Vergleiche verwendet</div>
+            <div style={{marginBottom:8,fontSize:13}}>📉 <strong>Gewichtsverlauf</strong>: Tracke dein Körpergewicht über Zeit</div>
+            <div style={{fontSize:13}}>🎯 <strong>Traumziele</strong>: Setze dir Zielgewichte für bestimmte Übungen mit Deadline</div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id:"custom",
+      icon:"➕",
+      title:"Eigene Übungen hinzufügen",
+      color:"var(--grn)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}>Du kannst eigene Übungen hinzufügen die nicht in der Standardliste sind.</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            <div style={{marginBottom:8,fontSize:13}}>1️⃣ Tippe auf <strong style={{color:"var(--acc)"}}>➕</strong> oben rechts im Header</div>
+            <div style={{marginBottom:8,fontSize:13}}>2️⃣ Gib einen Namen und Muskelgruppe an</div>
+            <div style={{fontSize:13}}>3️⃣ Wähle ob es eine Gewichts- oder Körpergewichtsübung ist</div>
+          </div>
+          <div style={{background:"rgba(52,211,153,.07)",border:"1px solid rgba(52,211,153,.2)",borderRadius:8,padding:10,fontSize:13,color:"var(--text2)"}}>
+            ⚠️ Eigene Übungen können <strong>nicht gerankt</strong> werden, da keine Vergleichswerte vorhanden sind. Du kannst sie aber trotzdem im Log tracken.
+          </div>
+        </div>
+      )
+    },
+    {
+      id:"1rm",
+      icon:"🧮",
+      title:"Was ist der Est. 1RM?",
+      color:"var(--text2)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}>Der <strong>geschätzte 1RM (Ein-Wiederholungs-Maximum)</strong> ist das maximale Gewicht das du theoretisch einmal heben könntest.</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            <div style={{fontSize:13,marginBottom:6}}>Berechnung mit der <strong>Epley-Formel</strong>:</div>
+            <div style={{fontFamily:"var(--head)",fontSize:14,color:"var(--acc)",textAlign:"center",padding:"8px 0"}}>1RM = Gewicht × (1 + Wiederholungen ÷ 30)</div>
+            <div style={{fontSize:12,color:"var(--muted)",marginTop:6}}>Beispiel: 80 kg × 5 Wdh. → Est. 1RM = 80 × (1 + 5/30) ≈ <strong style={{color:"var(--acc)"}}>93 kg</strong></div>
+          </div>
+          <p style={{fontSize:13,color:"var(--text2)"}}>💡 Diese Formel ist für die meisten Lifter auf ~5% genau. Du musst nicht bis zum Maximum gehen um einen guten Score zu bekommen!</p>
+        </div>
+      )
+    },
+    {
+      id:"unilateral",
+      icon:"💪",
+      title:"Was bedeutet 'Unilateral'?",
+      color:"var(--purp)",
+      content: (
+        <div>
+          <p style={{marginBottom:10}}><strong style={{color:"var(--purp)"}}>Unilateral</strong> bedeutet dass du eine Übung einseitig ausführst (z.B. einarmiges Rudern).</p>
+          <div style={{background:"var(--bg)",borderRadius:8,padding:12,marginBottom:10}}>
+            <div style={{fontSize:13,marginBottom:8}}>Im PRs-Tab: Öffne eine Übung → Tippe auf ⚙️ → Aktiviere <strong>"Unilateral ausführen"</strong></div>
+            <div style={{fontSize:13,color:"var(--text2)"}}>Dies ist nur eine Markierung. Das Gewicht wird wie gewohnt bewertet – es ist ein Hinweis für dich selbst.</div>
+          </div>
+          <p style={{fontSize:13,color:"var(--text2)"}}>💡 Bei Kurzhantelübungen (z.B. KH Curl) ist in der Beschreibung angegeben ob du das Gewicht pro Seite oder gesamt eingibst.</p>
+        </div>
+      )
+    },
+  ];
+
+  return (
+    <div className="scroll fi">
+      <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,rgba(56,189,248,.08),rgba(0,0,0,0))"}}>
+        <div className="h2" style={{marginBottom:6}}>❓ Hilfe & Anleitung</div>
+        <div style={{fontSize:14,color:"var(--text2)"}}>Alles über IronRank erklärt – tippe auf ein Thema um mehr zu erfahren.</div>
+      </div>
+
+      {/* Quick Start */}
+      <div style={{background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:10,padding:14,marginBottom:16}}>
+        <div style={{fontFamily:"var(--head)",fontSize:13,fontWeight:700,color:"var(--gld)",letterSpacing:1.5,marginBottom:10}}>🚀 SCHNELLSTART</div>
+        {[
+          {step:"1",text:'Geh zum "PRs" Tab und trag dein bestes Bankdrücken ein',tab:"prs"},
+          {step:"2",text:'Füge weitere Übungen für jede Muskelgruppe hinzu',tab:"prs"},
+          {step:"3",text:'Logge dein erstes Training unter "Log"',tab:"log"},
+          {step:"4",text:'Check deine Statistiken und freischaltbare Achievements',tab:"stats"},
+        ].map(s=>(
+          <div key={s.step} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,cursor:"pointer"}} onClick={()=>onNavigate(s.tab)}>
+            <div style={{width:24,height:24,borderRadius:"50%",background:"rgba(251,191,36,.2)",border:"1px solid rgba(251,191,36,.4)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--head)",fontWeight:700,fontSize:13,color:"var(--gld)",flexShrink:0}}>{s.step}</div>
+            <div style={{fontSize:13,color:"var(--text)"}}>{s.text}</div>
+            <div style={{marginLeft:"auto",color:"var(--muted)",fontSize:12}}>→</div>
+          </div>
+        ))}
+      </div>
+
+      {/* FAQ Accordion */}
+      {sections.map(s=>(
+        <div key={s.id} style={{background:"var(--surf)",border:`1px solid ${open===s.id?s.color+"44":"var(--bdr)"}`,borderRadius:10,marginBottom:8,overflow:"hidden",transition:"border-color .2s"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",cursor:"pointer"}} onClick={()=>setOpen(open===s.id?null:s.id)}>
+            <span style={{fontSize:20}}>{s.icon}</span>
+            <div style={{flex:1,fontWeight:600,fontSize:15,color:"#fff"}}>{s.title}</div>
+            <span style={{color:"var(--muted)",fontSize:13,transition:"transform .2s",display:"inline-block",transform:open===s.id?"rotate(180deg)":"none"}}>▼</span>
+          </div>
+          {open===s.id&&(
+            <div style={{padding:"0 16px 16px",borderTop:"1px solid var(--bdr)",paddingTop:14,color:"var(--text2)",fontSize:14,lineHeight:1.6}}>
+              {s.content}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div style={{textAlign:"center",padding:"20px 0 10px",fontSize:12,color:"var(--muted)"}}>
+        IronRank v1.0 · Alle Daten lokal gespeichert · Keine Registrierung nötig
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════  ROOT  */
 const TABS = [
   { id:"dashboard",    label:"Home",    icon:"🏠" },
@@ -1889,6 +2158,7 @@ const TABS = [
   { id:"stats",        label:"Stats",   icon:"📊" },
   { id:"achievements", label:"Awards",  icon:"🏆" },
   { id:"profile",      label:"Profil",  icon:"👤" },
+  { id:"help",         label:"Hilfe",   icon:"❓" },
 ];
 
 function IronRank() {
@@ -1953,7 +2223,9 @@ function IronRank() {
               {newAchs>0&&<div style={{color:"var(--gld)"}}>🏆 {newAchs} Achievements</div>}
             </div>
             {/* Custom exercise button */}
-            <button title="Eigene Übung" onClick={()=>setShowAddCustom(true)} style={{background:"none",border:"1px solid var(--bdr2)",borderRadius:8,padding:"6px 10px",color:"var(--muted)",fontSize:16,cursor:"pointer",flexShrink:0}}>➕</button>
+            <button title="Eigene Übung hinzufügen" onClick={()=>setShowAddCustom(true)} style={{background:"rgba(56,189,248,.1)",border:"1px solid rgba(56,189,248,.3)",borderRadius:8,padding:"6px 10px",color:"var(--acc)",fontSize:16,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",gap:4}}>
+              <span>➕</span>
+            </button>
           </div>
         </div>
 
@@ -1973,6 +2245,7 @@ function IronRank() {
         {tab==="stats"        && <StatsTab        sessions={sessions} prs={prs} userProfile={userProfile} bodyWeightLog={bodyWeightLog} />}
         {tab==="achievements" && <AchievementsTab prs={prs} sessions={sessions} customExercises={customExercises} goals={goals} />}
         {tab==="profile"      && <ProfileTab      userProfile={userProfile} setUserProfile={setUserProfile} goals={goals} setGoals={setGoals} bodyWeightLog={bodyWeightLog} setBodyWeightLog={setBodyWeightLog} prs={prs} />}
+        {tab==="help"         && <HelpTab onNavigate={setTab} />}
 
         {showAddCustom&&(
           <CustomExModal
